@@ -685,6 +685,22 @@ var AgentPlugin = class extends import_obsidian.Plugin {
     };
   }
 };
+async function copyLine(text) {
+  var _a;
+  const write = (_a = navigator.clipboard) == null ? void 0 : _a.writeText;
+  if (typeof write !== "function") {
+    new import_obsidian.Notice("\u0431\u0443\u0444\u0435\u0440 \u043E\u0431\u043C\u0435\u043D\u0430 \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D");
+    return;
+  }
+  try {
+    await write.call(navigator.clipboard, text);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    new import_obsidian.Notice(message || "\u043D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C");
+    return;
+  }
+  new import_obsidian.Notice("\u0441\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u043D\u043E");
+}
 var AgentView = class extends import_obsidian.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
@@ -772,7 +788,12 @@ var AgentView = class extends import_obsidian.ItemView {
     this.logEl.empty();
     if (session) {
       for (const line of session.lines) {
-        this.logEl.createDiv({ cls: "agent-line agent-" + line.kind, text: line.text });
+        const entry = this.logEl.createDiv({ cls: "agent-entry" });
+        entry.createDiv({ cls: "agent-line agent-" + line.kind, text: line.text });
+        if ((line.kind === "user" || line.kind === "assistant") && line.text) {
+          const copy = entry.createEl("button", { text: "\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C" });
+          copy.addEventListener("click", () => void copyLine(line.text));
+        }
       }
     }
     this.logEl.scrollTop = this.logEl.scrollHeight;

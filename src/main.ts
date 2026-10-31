@@ -276,6 +276,22 @@ export default class AgentPlugin extends Plugin {
   }
 }
 
+async function copyLine(text: string) {
+  const write = navigator.clipboard?.writeText;
+  if (typeof write !== "function") {
+    new Notice("буфер обмена недоступен");
+    return;
+  }
+  try {
+    await write.call(navigator.clipboard, text);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    new Notice(message || "не удалось скопировать");
+    return;
+  }
+  new Notice("скопировано");
+}
+
 class AgentView extends ItemView {
   plugin: AgentPlugin;
   logEl: HTMLElement | null = null;
@@ -368,7 +384,12 @@ class AgentView extends ItemView {
     this.logEl.empty();
     if (session) {
       for (const line of session.lines) {
-        this.logEl.createDiv({ cls: "agent-line agent-" + line.kind, text: line.text });
+        const entry = this.logEl.createDiv({ cls: "agent-entry" });
+        entry.createDiv({ cls: "agent-line agent-" + line.kind, text: line.text });
+        if ((line.kind === "user" || line.kind === "assistant") && line.text) {
+          const copy = entry.createEl("button", { text: "копировать" });
+          copy.addEventListener("click", () => void copyLine(line.text));
+        }
       }
     }
     this.logEl.scrollTop = this.logEl.scrollHeight;
