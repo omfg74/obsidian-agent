@@ -71,16 +71,6 @@
   resize: vertical;
 }
 
-.agent-chat-row {
-  display: flex;
-  gap: 8px;
-}
-
-.agent-chat-row select {
-  flex: 1;
-  min-width: 0;
-}
-
 .agent-row {
   display: flex;
   gap: 8px;

@@ -346,13 +346,13 @@ class AgentView extends ItemView {
       provider.model = value;
       void this.plugin.saveSettings();
     });
-    const chatRow = root.createDiv({ cls: "agent-chat-row" });
-    this.chatEl = chatRow.createEl("select");
+    this.chatEl = root.createEl("select", { cls: "agent-provider" });
     this.chatEl.addEventListener("change", () => {
       const value = this.chatEl?.value ?? "";
       if (!value) return;
       void this.plugin.openSession(value);
     });
+    const chatRow = root.createDiv({ cls: "agent-row" });
     chatRow.createEl("button", { text: "новый чат" }).addEventListener("click", () => void this.plugin.newChat());
     chatRow.createEl("button", { text: "убрать" }).addEventListener("click", () => void this.plugin.deleteSession());
     this.noteEl = root.createDiv({ cls: "agent-tool" });
@@ -428,12 +428,12 @@ class AgentView extends ItemView {
     const select = this.chatEl;
     if (!select) return;
     const sessions = this.plugin.sessions;
-    const signature = sessions.map((item) => item.id + "\0" + item.title).join("\n");
+    const signature = sessions.map((item) => item.id + "\0" + item.title + "\0" + item.lines.length).join("\n");
     if (this.chatSignature !== signature) {
       while (select.options.length > 0) select.remove(0);
       const known = sessions.some((item) => item.id === this.plugin.sessionId);
       if (!known) select.add(new Option(sessions.length === 0 ? "нет чата" : "выбери чат", ""));
-      for (const item of sessions) select.add(new Option(item.title || item.id, item.id));
+      for (const item of sessions) select.add(new Option(item.lines.length === 0 ? "чат" : item.title || item.id, item.id));
       this.chatSignature = signature;
     }
     const wanted = sessions.some((item) => item.id === this.plugin.sessionId) ? this.plugin.sessionId : "";

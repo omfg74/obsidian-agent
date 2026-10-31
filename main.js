@@ -217,12 +217,12 @@ function readProvider(item) {
 
 // src/chats.ts
 function newSession() {
-  return { id: newProviderId(), title: "\u043D\u043E\u0432\u044B\u0439 \u0447\u0430\u0442", lines: [], history: [], imagesOmitted: false };
+  return { id: newProviderId(), title: "\u0447\u0430\u0442", lines: [], history: [], imagesOmitted: false };
 }
 function sessionTitle(lines) {
   var _a, _b;
   const text = (_b = (_a = lines.find((line) => line.kind === "user")) == null ? void 0 : _a.text.trim()) != null ? _b : "";
-  if (!text) return "\u043D\u043E\u0432\u044B\u0439 \u0447\u0430\u0442";
+  if (!text) return "\u0447\u0430\u0442";
   return text.length > 40 ? text.slice(0, 40) + "\u2026" : text;
 }
 function stripImages(history) {
@@ -750,14 +750,14 @@ var AgentView = class extends import_obsidian.ItemView {
       provider.model = value;
       void this.plugin.saveSettings();
     });
-    const chatRow = root.createDiv({ cls: "agent-chat-row" });
-    this.chatEl = chatRow.createEl("select");
+    this.chatEl = root.createEl("select", { cls: "agent-provider" });
     this.chatEl.addEventListener("change", () => {
       var _a, _b;
       const value = (_b = (_a = this.chatEl) == null ? void 0 : _a.value) != null ? _b : "";
       if (!value) return;
       void this.plugin.openSession(value);
     });
+    const chatRow = root.createDiv({ cls: "agent-row" });
     chatRow.createEl("button", { text: "\u043D\u043E\u0432\u044B\u0439 \u0447\u0430\u0442" }).addEventListener("click", () => void this.plugin.newChat());
     chatRow.createEl("button", { text: "\u0443\u0431\u0440\u0430\u0442\u044C" }).addEventListener("click", () => void this.plugin.deleteSession());
     this.noteEl = root.createDiv({ cls: "agent-tool" });
@@ -830,12 +830,12 @@ var AgentView = class extends import_obsidian.ItemView {
     const select = this.chatEl;
     if (!select) return;
     const sessions = this.plugin.sessions;
-    const signature = sessions.map((item) => item.id + "\0" + item.title).join("\n");
+    const signature = sessions.map((item) => item.id + "\0" + item.title + "\0" + item.lines.length).join("\n");
     if (this.chatSignature !== signature) {
       while (select.options.length > 0) select.remove(0);
       const known = sessions.some((item) => item.id === this.plugin.sessionId);
       if (!known) select.add(new Option(sessions.length === 0 ? "\u043D\u0435\u0442 \u0447\u0430\u0442\u0430" : "\u0432\u044B\u0431\u0435\u0440\u0438 \u0447\u0430\u0442", ""));
-      for (const item of sessions) select.add(new Option(item.title || item.id, item.id));
+      for (const item of sessions) select.add(new Option(item.lines.length === 0 ? "\u0447\u0430\u0442" : item.title || item.id, item.id));
       this.chatSignature = signature;
     }
     const wanted = sessions.some((item) => item.id === this.plugin.sessionId) ? this.plugin.sessionId : "";

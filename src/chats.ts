@@ -12,12 +12,12 @@ export interface Session {
 }
 
 export function newSession(): Session {
-  return { id: newProviderId(), title: "новый чат", lines: [], history: [], imagesOmitted: false };
+  return { id: newProviderId(), title: "чат", lines: [], history: [], imagesOmitted: false };
 }
 
 export function sessionTitle(lines: ChatLine[]): string {
   const text = lines.find((line) => line.kind === "user")?.text.trim() ?? "";
-  if (!text) return "новый чат";
+  if (!text) return "чат";
   return text.length > 40 ? text.slice(0, 40) + "…" : text;
 }
 

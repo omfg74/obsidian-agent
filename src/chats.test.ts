@@ -5,7 +5,7 @@ import { sessionTitle, sessionsFromSaved, stripImages } from "./chats.ts";
 
 test("название чата берётся из первой реплики", () => {
   assert.equal(sessionTitle([{ kind: "user", text: "поправь лекцию" }]), "поправь лекцию");
-  assert.equal(sessionTitle([]), "новый чат");
+  assert.equal(sessionTitle([]), "чат");
 });
 
 test("картинка не остаётся в сохранённом контексте", () => {
