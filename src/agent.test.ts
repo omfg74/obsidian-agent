@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { runAgent, systemPrompt } from "./agent.ts";
+import { readTurn, runAgent, systemPrompt, visibleToolResult } from "./agent.ts";
 import { replaceOnce } from "./replace.ts";
 import { dispatchTool, resolvePath, type VaultFs } from "./vault.ts";
 
@@ -89,6 +89,45 @@ test("агент смотрит картинку и правит текст", as
   assert.deepEqual(seen, ["view_image", "search_replace"]);
   assert.equal(files.get("лекция.md"), "Стало так.");
   assert.equal(messages[messages.length - 1].content, "Готово.");
+});
+
+test("ход показывает finish и длину аргумента", async () => {
+  const lines: string[] = [];
+  const content = "а".repeat(149);
+  await runAgent({
+    messages: [{ role: "user", content: "запиши" }],
+    maxSteps: 2,
+    onLine: (line) => lines.push(line),
+    post: async () => {
+      if (lines.length === 0) {
+        return {
+          content: null,
+          finishReason: "tool_calls",
+          tool_calls: [{ id: "1", type: "function", function: { name: "write_note", arguments: JSON.stringify({ path: "yr.md", content }) } }],
+        };
+      }
+      return { content: "готово", finishReason: "stop" };
+    },
+    callTool: async () => ({ text: "записал yr.md, " + content.length + " символов" }),
+  });
+  assert.deepEqual(lines, [
+    "finish: tool_calls",
+    "инструмент write_note, аргумент " + JSON.stringify({ path: "yr.md", content }).length + " символов",
+    "write_note: записал yr.md, 149 символов",
+    "finish: stop",
+  ]);
+});
+
+test("длинный результат инструмента в чат не копируется", () => {
+  assert.equal(visibleToolResult("read_note", "а".repeat(241)), "read_note: 241 символов");
+});
+
+test("finish_reason length остаётся как прислал провайдер", () => {
+  const turn = readTurn({
+    choices: [{ finish_reason: "length", message: { content: null, tool_calls: [{ id: "1", type: "function", function: { name: "write_note", arguments: "{" } }] } }],
+  });
+  assert.equal(turn.finishReason, "length");
+  assert.equal(readTurn({ choices: [{ message: { content: "ок" } }] }).finishReason, null);
 });
 
 test("неоднозначный путь не выбирает файл сам", async () => {

@@ -104,6 +104,26 @@ function systemPrompt(activePath) {
     where
   ].join("\n");
 }
+var VISIBLE_TOOL = 240;
+function visibleToolResult(name, text) {
+  if (text.length <= VISIBLE_TOOL) return name + ": " + text;
+  return name + ": " + text.length + " \u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432";
+}
+function readTurn(body) {
+  var _a;
+  if (!body || typeof body !== "object") throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F");
+  const choices = body.choices;
+  if (!Array.isArray(choices) || !choices[0] || typeof choices[0] !== "object") throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F");
+  const choice = choices[0];
+  if (!choice.message || typeof choice.message !== "object") throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F");
+  const message = choice.message;
+  const reason = choice.finish_reason;
+  return {
+    content: (_a = message.content) != null ? _a : null,
+    tool_calls: message.tool_calls,
+    finishReason: typeof reason === "string" && reason.trim() ? reason : null
+  };
+}
 function asRecord(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("\u0430\u0440\u0433\u0443\u043C\u0435\u043D\u0442\u044B \u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442\u0430 \u043D\u0435 \u043E\u0431\u044A\u0435\u043A\u0442");
@@ -111,30 +131,33 @@ function asRecord(value) {
   return value;
 }
 async function runAgent(input) {
-  var _a, _b, _c, _d, _e, _f, _g;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k;
   const messages = input.messages;
   for (let step = 0; step < input.maxSteps; step++) {
     if ((_a = input.shouldStop) == null ? void 0 : _a.call(input)) throw new Error("\u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u043E");
     const turn = await input.post(messages);
-    const calls = (_b = turn.tool_calls) != null ? _b : [];
+    (_c = input.onLine) == null ? void 0 : _c.call(input, "finish: " + ((_b = turn.finishReason) != null ? _b : "\u043D\u0435\u0442"));
+    const calls = (_d = turn.tool_calls) != null ? _d : [];
     if (calls.length === 0) {
-      messages.push({ role: "assistant", content: (_c = turn.content) != null ? _c : "" });
+      messages.push({ role: "assistant", content: (_e = turn.content) != null ? _e : "" });
       return messages;
     }
     messages.push({ role: "assistant", content: turn.content, tool_calls: calls });
     for (const call of calls) {
-      if ((_d = input.shouldStop) == null ? void 0 : _d.call(input)) throw new Error("\u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u043E");
+      if ((_f = input.shouldStop) == null ? void 0 : _f.call(input)) throw new Error("\u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u043E");
       if (!call.id) throw new Error("\u043C\u043E\u0434\u0435\u043B\u044C \u043F\u0440\u0438\u0441\u043B\u0430\u043B\u0430 \u0432\u044B\u0437\u043E\u0432 \u0431\u0435\u0437 id");
-      const name = ((_e = call.function) == null ? void 0 : _e.name) || "";
-      (_f = input.onLine) == null ? void 0 : _f.call(input, "\u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442 " + name);
+      const name = ((_g = call.function) == null ? void 0 : _g.name) || "";
+      const raw = (_h = call.function) == null ? void 0 : _h.arguments;
+      (_i = input.onLine) == null ? void 0 : _i.call(input, "\u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442 " + name + ", \u0430\u0440\u0433\u0443\u043C\u0435\u043D\u0442 " + (typeof raw === "string" ? raw.length + " \u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432" : "\u043D\u0435 \u0441\u0442\u0440\u043E\u043A\u0430"));
       let output;
       try {
-        const args = asRecord(JSON.parse(((_g = call.function) == null ? void 0 : _g.arguments) || "{}"));
+        const args = asRecord(JSON.parse(((_j = call.function) == null ? void 0 : _j.arguments) || "{}"));
         output = await input.callTool(name, args);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         output = { text: "\u043E\u0448\u0438\u0431\u043A\u0430: " + message };
       }
+      (_k = input.onLine) == null ? void 0 : _k.call(input, visibleToolResult(name, output.text));
       messages.push({ role: "tool", tool_call_id: call.id, content: output.text });
       if (output.image) {
         messages.push({
@@ -151,6 +174,150 @@ async function runAgent(input) {
 }
 
 // src/settings.ts
+var PROVIDER_PRESETS = [
+  {
+    id: "opencode",
+    name: "OpenCode",
+    base: "https://opencode.ai/inference/openai/v1",
+    modelsBase: "https://opencode.ai/inference/v1",
+    access: "key",
+    hint: "\u041A\u043B\u044E\u0447 \u043A\u043E\u043D\u0441\u043E\u043B\u0438 OpenCode. \u0412 \u0441\u043F\u0438\u0441\u043A\u0435 \u0442\u043E\u043B\u044C\u043A\u043E \u043C\u043E\u0434\u0435\u043B\u0438 chat completions: Claude, GPT \u0438 Gemini \u0443 OpenCode \u0438\u0434\u0443\u0442 \u0434\u0440\u0443\u0433\u0438\u043C API. \u0411\u0435\u0441\u043F\u043B\u0430\u0442\u043D\u044B\u0435 \u043C\u043E\u0434\u0435\u043B\u0438 \u0441\u043D\u0430\u0440\u0443\u0436\u0438 \u043E\u0442\u0432\u0435\u0447\u0430\u044E\u0442 403."
+  },
+  {
+    id: "openrouter",
+    name: "OpenRouter",
+    base: "https://openrouter.ai/api/v1",
+    access: "key",
+    hint: "\u041A\u043B\u044E\u0447 OpenRouter."
+  },
+  {
+    id: "openai",
+    name: "OpenAI",
+    base: "https://api.openai.com/v1",
+    access: "key",
+    hint: "\u041A\u043B\u044E\u0447 OpenAI."
+  },
+  {
+    id: "gemini",
+    name: "Gemini",
+    base: "https://generativelanguage.googleapis.com/v1beta/openai",
+    access: "key",
+    hint: "\u041A\u043B\u044E\u0447 Google AI Studio."
+  },
+  {
+    id: "groq",
+    name: "Groq",
+    base: "https://api.groq.com/openai/v1",
+    access: "key",
+    hint: "\u041A\u043B\u044E\u0447 Groq."
+  },
+  {
+    id: "deepseek",
+    name: "DeepSeek",
+    base: "https://api.deepseek.com/v1",
+    access: "key",
+    hint: "\u041A\u043B\u044E\u0447 DeepSeek."
+  },
+  {
+    id: "mistral",
+    name: "Mistral",
+    base: "https://api.mistral.ai/v1",
+    access: "key",
+    hint: "\u041A\u043B\u044E\u0447 Mistral."
+  },
+  {
+    id: "xai",
+    name: "xAI",
+    base: "https://api.x.ai/v1",
+    access: "key",
+    hint: "\u041A\u043B\u044E\u0447 xAI."
+  },
+  {
+    id: "anthropic",
+    name: "Anthropic",
+    base: "https://api.anthropic.com/v1",
+    access: "key",
+    hint: "\u041A\u043B\u044E\u0447 Anthropic."
+  },
+  {
+    id: "cerebras",
+    name: "Cerebras",
+    base: "https://api.cerebras.ai/v1",
+    access: "key",
+    hint: "\u041A\u043B\u044E\u0447 Cerebras."
+  },
+  {
+    id: "fireworks",
+    name: "Fireworks",
+    base: "https://api.fireworks.ai/inference/v1",
+    access: "key",
+    hint: "\u041A\u043B\u044E\u0447 Fireworks."
+  },
+  {
+    id: "sambanova",
+    name: "SambaNova",
+    base: "https://api.sambanova.ai/v1",
+    access: "key",
+    hint: "\u041A\u043B\u044E\u0447 SambaNova."
+  },
+  {
+    id: "huggingface",
+    name: "Hugging Face",
+    base: "https://router.huggingface.co/v1",
+    access: "key",
+    hint: "\u041A\u043B\u044E\u0447 Hugging Face."
+  },
+  {
+    id: "nvidia",
+    name: "NVIDIA",
+    base: "https://integrate.api.nvidia.com/v1",
+    access: "key",
+    hint: "\u041A\u043B\u044E\u0447 NVIDIA."
+  },
+  {
+    id: "minimax",
+    name: "MiniMax",
+    base: "https://api.minimax.io/v1",
+    access: "key",
+    hint: "\u041A\u043B\u044E\u0447 MiniMax."
+  },
+  {
+    id: "cohere",
+    name: "Cohere",
+    base: "https://api.cohere.com/compatibility/v1",
+    access: "key",
+    hint: "\u041A\u043B\u044E\u0447 Cohere."
+  },
+  {
+    id: "perplexity",
+    name: "Perplexity",
+    base: "https://api.perplexity.ai",
+    modelsBase: "https://api.perplexity.ai/v1",
+    access: "key",
+    hint: "\u041A\u043B\u044E\u0447 Perplexity."
+  },
+  {
+    id: "moonshot",
+    name: "Moonshot",
+    base: "https://api.moonshot.ai/v1",
+    access: "key",
+    hint: "\u041A\u043B\u044E\u0447 Moonshot."
+  },
+  {
+    id: "custom",
+    name: "\u0421\u0432\u043E\u0439",
+    base: "",
+    access: "key",
+    hint: "\u041B\u044E\u0431\u043E\u0439 OpenAI-\u0441\u043E\u0432\u043C\u0435\u0441\u0442\u0438\u043C\u044B\u0439 \u0430\u0434\u0440\u0435\u0441, \u0431\u0435\u0437 /chat/completions."
+  },
+  {
+    id: "local",
+    name: "\u041B\u043E\u043A\u0430\u043B\u044C\u043D\u0430\u044F",
+    base: "",
+    access: "open",
+    hint: "\u0410\u0434\u0440\u0435\u0441 \u0441\u0435\u0440\u0432\u0435\u0440\u0430 \u0432 \u0441\u0435\u0442\u0438, \u0431\u0435\u0437 /chat/completions. \u041D\u0430\u043F\u0440\u0438\u043C\u0435\u0440 http://192.168.1.10:11434/v1. \u041D\u0430 iPad \u043C\u043E\u0434\u0435\u043B\u044C \u043D\u0435 \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0435\u0442\u0441\u044F. \u041A\u043B\u044E\u0447 \u043D\u0435 \u043E\u0431\u044F\u0437\u0430\u0442\u0435\u043B\u0435\u043D."
+  }
+];
 function freshSettings() {
   return {
     providers: [{ id: "openai", name: "OpenAI", base: "https://api.openai.com/v1", key: "", model: "gpt-4o" }],
@@ -175,6 +342,66 @@ function providerLabel(provider) {
 function newProviderId() {
   if (typeof crypto.randomUUID !== "function") throw new Error("\u043D\u0435\u0442 crypto.randomUUID");
   return crypto.randomUUID();
+}
+function presetById(id) {
+  return PROVIDER_PRESETS.find((item) => item.id === id);
+}
+function providerFromPreset(preset, id) {
+  const provider = {
+    id,
+    name: preset.name,
+    base: preset.base,
+    key: "",
+    model: "",
+    preset: preset.id
+  };
+  if (preset.access === "open") provider.access = "open";
+  if (preset.modelsBase) provider.modelsBase = preset.modelsBase;
+  return provider;
+}
+function providerNeedsKey(provider) {
+  return provider.access !== "open";
+}
+function providerCanList(provider) {
+  if (!provider.base.trim()) return false;
+  if (providerNeedsKey(provider) && !provider.key.trim()) return false;
+  return true;
+}
+function assignProviderBase(provider, base) {
+  const next = base.trim();
+  if (provider.modelsBase && provider.preset) {
+    const preset = presetById(provider.preset);
+    if (preset && next !== preset.base) {
+      delete provider.modelsBase;
+      delete provider.preset;
+    }
+  }
+  provider.base = next;
+}
+function requestHeaders(provider, json) {
+  const headers = {};
+  if (json) headers["Content-Type"] = "application/json";
+  const key = provider.key.trim();
+  if (!key) {
+    if (providerNeedsKey(provider)) throw new Error("\u0443\u043A\u0430\u0436\u0438 \u043A\u043B\u044E\u0447");
+    return headers;
+  }
+  headers.Authorization = "Bearer " + key;
+  return headers;
+}
+function chatCompletionsUrl(provider) {
+  return apiBase(provider) + "/chat/completions";
+}
+function modelsEndpoint(provider) {
+  var _a;
+  const base = apiBase(provider);
+  const root = (((_a = provider.modelsBase) == null ? void 0 : _a.trim()) || base).replace(/\/$/, "");
+  return root + "/models";
+}
+function apiBase(provider) {
+  const base = provider.base.trim().replace(/\/$/, "");
+  if (!base) throw new Error("\u0443\u043A\u0430\u0436\u0438 \u0430\u0434\u0440\u0435\u0441 API");
+  return base;
 }
 function settingsFromSaved(saved) {
   if (!saved || typeof saved !== "object") return freshSettings();
@@ -220,13 +447,26 @@ function readProvider(item) {
   if (typeof row.base !== "string") throw new Error("\u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440 \u0431\u0435\u0437 \u0430\u0434\u0440\u0435\u0441\u0430");
   if (typeof row.key !== "string") throw new Error("\u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440 \u0431\u0435\u0437 \u043A\u043B\u044E\u0447\u0430");
   if (typeof row.model !== "string") throw new Error("\u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440 \u0431\u0435\u0437 \u043C\u043E\u0434\u0435\u043B\u0438");
-  return {
+  const provider = {
     id: row.id.trim(),
     name: row.name.trim(),
     base: row.base.trim(),
     key: row.key,
     model: row.model.trim()
   };
+  if ("access" in row && row.access !== void 0) {
+    if (row.access !== "key" && row.access !== "open") throw new Error("\u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440 \u0441 \u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u044B\u043C \u0434\u043E\u0441\u0442\u0443\u043F\u043E\u043C");
+    if (row.access === "open") provider.access = "open";
+  }
+  if ("modelsBase" in row && row.modelsBase !== void 0) {
+    if (typeof row.modelsBase !== "string" || !row.modelsBase.trim()) throw new Error("\u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440 \u0441 \u043F\u0443\u0441\u0442\u044B\u043C \u0430\u0434\u0440\u0435\u0441\u043E\u043C \u043C\u043E\u0434\u0435\u043B\u0435\u0439");
+    provider.modelsBase = row.modelsBase.trim();
+  }
+  if ("preset" in row && row.preset !== void 0) {
+    if (typeof row.preset !== "string" || !row.preset.trim()) throw new Error("\u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440 \u0441 \u043F\u0443\u0441\u0442\u043E\u0439 \u043F\u0440\u0435\u0434\u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u043E\u0439");
+    provider.preset = row.preset.trim();
+  }
+  return provider;
 }
 
 // src/chats.ts
@@ -326,20 +566,145 @@ function readToolCall(item) {
 }
 
 // src/models.ts
-function modelIds(body) {
+var PRICE_KEYS = ["prompt", "completion", "input", "output", "request", "image", "hourly", "audio"];
+function listedModels(body) {
   if (!body || typeof body !== "object" || !("data" in body)) throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043F\u0438\u0441\u043A\u0430 \u043C\u043E\u0434\u0435\u043B\u0435\u0439");
   const data = body.data;
   if (!Array.isArray(data)) throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043F\u0438\u0441\u043A\u0430 \u043C\u043E\u0434\u0435\u043B\u0435\u0439");
   if (data.length === 0) throw new Error("\u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440 \u043D\u0435 \u0432\u0435\u0440\u043D\u0443\u043B \u043D\u0438 \u043E\u0434\u043D\u043E\u0439 \u043C\u043E\u0434\u0435\u043B\u0438");
-  const ids = [];
+  const models = [];
+  const seen = /* @__PURE__ */ new Set();
+  let foreign = 0;
   for (const item of data) {
-    if (!item || typeof item !== "object" || typeof item.id !== "string") throw new Error("\u0432 \u0441\u043F\u0438\u0441\u043A\u0435 \u043C\u043E\u0434\u0435\u043B\u0435\u0439 \u0435\u0441\u0442\u044C \u0437\u0430\u043F\u0438\u0441\u044C \u0431\u0435\u0437 id");
-    const id = item.id.trim();
+    if (!item || typeof item !== "object") throw new Error("\u0432 \u0441\u043F\u0438\u0441\u043A\u0435 \u043C\u043E\u0434\u0435\u043B\u0435\u0439 \u0435\u0441\u0442\u044C \u0437\u0430\u043F\u0438\u0441\u044C \u0431\u0435\u0437 id");
+    const row = item;
+    if (typeof row.id !== "string") throw new Error("\u0432 \u0441\u043F\u0438\u0441\u043A\u0435 \u043C\u043E\u0434\u0435\u043B\u0435\u0439 \u0435\u0441\u0442\u044C \u0437\u0430\u043F\u0438\u0441\u044C \u0431\u0435\u0437 id");
+    const id = row.id.trim();
     if (!id) throw new Error("\u0432 \u0441\u043F\u0438\u0441\u043A\u0435 \u043C\u043E\u0434\u0435\u043B\u0435\u0439 \u0435\u0441\u0442\u044C \u0437\u0430\u043F\u0438\u0441\u044C \u0431\u0435\u0437 id");
-    if (!ids.includes(id)) ids.push(id);
+    if (!chatCompletionsModel(row)) {
+      foreign++;
+      continue;
+    }
+    if (seen.has(id)) continue;
+    seen.add(id);
+    models.push({ id, pay: payOf(row), images: imagesOf(row) });
   }
-  ids.sort((a, b) => a.localeCompare(b));
-  return ids;
+  if (models.length === 0) {
+    throw new Error(foreign > 0 ? "\u0432 \u0441\u043F\u0438\u0441\u043A\u0435 \u043D\u0435\u0442 \u043C\u043E\u0434\u0435\u043B\u0435\u0439 \u0441 chat completions" : "\u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440 \u043D\u0435 \u0432\u0435\u0440\u043D\u0443\u043B \u043D\u0438 \u043E\u0434\u043D\u043E\u0439 \u043C\u043E\u0434\u0435\u043B\u0438");
+  }
+  models.sort((a, b) => a.id.localeCompare(b.id));
+  return models;
+}
+function chatCompletionsModel(row) {
+  if (!("api" in row) || row.api == null) return true;
+  if (typeof row.api !== "object" || Array.isArray(row.api)) return true;
+  return "chat-completions" in row.api;
+}
+function modelNotes(model) {
+  const notes = [];
+  if (model.pay === "free") notes.push("\u0431\u0435\u0441\u043F\u043B\u0430\u0442\u043D\u043E");
+  if (model.pay === "paid") notes.push("\u043F\u043B\u0430\u0442\u043D\u043E");
+  if (model.images === true) notes.push("\u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0438");
+  if (model.images === false) notes.push("\u0431\u0435\u0437 \u043A\u0430\u0440\u0442\u0438\u043D\u043E\u043A");
+  return notes.join(" \xB7 ");
+}
+function modelMenuLabel(model) {
+  const notes = modelNotes(model);
+  if (!notes) return model.id;
+  return notes + " \xB7 " + model.id;
+}
+function payOf(row) {
+  if ("pricing" in row && row.pricing != null) return priceTable(row.pricing);
+  if ("cost" in row && row.cost != null) return textCost(row.cost);
+  return null;
+}
+function priceTable(pricing) {
+  if (pricing === void 0 || pricing === null) return null;
+  if (typeof pricing !== "object" || Array.isArray(pricing)) return null;
+  const row = pricing;
+  const numbers = /* @__PURE__ */ new Map();
+  for (const key of PRICE_KEYS) {
+    if (!(key in row)) continue;
+    const price = priceNumber(row[key]);
+    if (price === null) return null;
+    numbers.set(key, price);
+  }
+  const tokens = numbers.has("prompt") && numbers.has("completion") || numbers.has("input") && numbers.has("output");
+  if (!tokens) return null;
+  for (const price of numbers.values()) {
+    if (price > 0) return "paid";
+  }
+  return "free";
+}
+function textCost(cost) {
+  if (!cost || typeof cost !== "object" || Array.isArray(cost)) return null;
+  const text = cost.text;
+  if (!text || typeof text !== "object" || Array.isArray(text)) return null;
+  const row = text;
+  const input = nestedPrice(row.input);
+  const output = nestedPrice(row.output);
+  if (input === null || output === null) return null;
+  if (input > 0 || output > 0) return "paid";
+  return "free";
+}
+function nestedPrice(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return priceNumber(value.price);
+}
+function priceNumber(value) {
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || value < 0) return null;
+    return value;
+  }
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  if (!/^\d+(?:\.\d+)?(?:e[+-]?\d+)?$/i.test(text)) return null;
+  const price = Number(text);
+  if (!Number.isFinite(price) || price < 0) return null;
+  return price;
+}
+function imagesOf(row) {
+  const architecture = row.architecture;
+  if (architecture && typeof architecture === "object" && !Array.isArray(architecture)) {
+    const spec = architecture;
+    if ("input_modalities" in spec) return modalitiesReadImages(spec.input_modalities);
+    if (typeof spec.modality === "string") return modalityReadsImages(spec.modality);
+  }
+  const modalities = mimeModalitiesReadImages(row.modalities);
+  if (modalities !== null) return modalities;
+  if (typeof row.supports_vision === "boolean") return row.supports_vision;
+  if (typeof row.vision === "boolean") return row.vision;
+  return null;
+}
+function mimeModalitiesReadImages(modalities) {
+  if (!modalities || typeof modalities !== "object" || Array.isArray(modalities)) return null;
+  const input = modalities.input;
+  if (!Array.isArray(input) || input.length === 0) return null;
+  let image = false;
+  for (const item of input) {
+    if (typeof item !== "string" || !item.trim()) return null;
+    const name = item.trim().toLowerCase();
+    if (name === "image" || name.startsWith("image/")) image = true;
+  }
+  return image;
+}
+function modalitiesReadImages(value) {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const names = [];
+  for (const item of value) {
+    if (typeof item !== "string" || !item.trim()) return null;
+    names.push(item.trim().toLowerCase());
+  }
+  return names.includes("image");
+}
+function modalityReadsImages(modality) {
+  const arrow = modality.indexOf("->");
+  if (arrow < 0) return null;
+  const input = modality.slice(0, arrow).trim().toLowerCase();
+  if (!input) return null;
+  const parts = input.split("+").map((part) => part.trim()).filter(Boolean);
+  if (parts.length === 0) return null;
+  return parts.includes("image");
 }
 
 // src/replace.ts
@@ -592,21 +957,18 @@ var AgentPlugin = class extends import_obsidian.Plugin {
     var _a;
     return (_a = this.settings.providers.find((item) => item.id === this.settings.activeId)) != null ? _a : null;
   }
-  async fetchModelIds(provider) {
-    const base = provider.base.trim().replace(/\/$/, "");
-    const key = provider.key.trim();
-    if (!base || !key) throw new Error("\u0443\u043A\u0430\u0436\u0438 \u0430\u0434\u0440\u0435\u0441 API \u0438 \u043A\u043B\u044E\u0447");
+  async fetchModels(provider) {
     const res = await (0, import_obsidian.requestUrl)({
-      url: base + "/models",
+      url: modelsEndpoint(provider),
       method: "GET",
-      headers: { Authorization: "Bearer " + key },
+      headers: requestHeaders(provider, false),
       throw: false
     });
     if (res.status < 200 || res.status >= 300) {
       const body = (res.text || "").slice(0, 500);
       throw new Error("\u0441\u043F\u0438\u0441\u043E\u043A \u043C\u043E\u0434\u0435\u043B\u0435\u0439 \u043E\u0442\u0432\u0435\u0442\u0438\u043B " + res.status + (body ? ": " + body : ""));
     }
-    return modelIds(res.json);
+    return listedModels(res.json);
   }
   async saveSettings() {
     const sessions = this.sessions.map((session) => {
@@ -650,10 +1012,9 @@ var AgentPlugin = class extends import_obsidian.Plugin {
       this.push({ kind: "error", text: "\u0432\u044B\u0431\u0435\u0440\u0438 \u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440\u0430 \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0430\u0445 \u043F\u043B\u0430\u0433\u0438\u043D\u0430" });
       return;
     }
-    const key = provider.key.trim();
     const model = provider.model.trim();
-    const base = provider.base.trim().replace(/\/$/, "");
-    if (!key) {
+    const base = provider.base.trim();
+    if (providerNeedsKey(provider) && !provider.key.trim()) {
       this.push({ kind: "error", text: "\u0443\u043A\u0430\u0436\u0438 \u043A\u043B\u044E\u0447 \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0430\u0445 \u043F\u043B\u0430\u0433\u0438\u043D\u0430" });
       return;
     }
@@ -678,7 +1039,7 @@ var AgentPlugin = class extends import_obsidian.Plugin {
         maxSteps: this.settings.maxSteps,
         shouldStop: () => this.stop,
         onLine: (line) => this.push({ kind: "tool", text: line }),
-        post: (batch) => this.post(base, key, model, batch),
+        post: (batch) => this.post(provider, model, batch),
         callTool: (name, args) => dispatchTool(this.vaultFs(), name, args)
       });
       const last = messages[messages.length - 1];
@@ -696,12 +1057,11 @@ var AgentPlugin = class extends import_obsidian.Plugin {
       await this.saveSettings();
     }
   }
-  async post(base, key, model, messages) {
-    var _a, _b, _c;
+  async post(provider, model, messages) {
     const res = await (0, import_obsidian.requestUrl)({
-      url: base + "/chat/completions",
+      url: chatCompletionsUrl(provider),
       method: "POST",
-      headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" },
+      headers: requestHeaders(provider, true),
       body: JSON.stringify({ model, messages, tools: TOOLS }),
       throw: false
     });
@@ -709,10 +1069,7 @@ var AgentPlugin = class extends import_obsidian.Plugin {
       const body = (res.text || "").slice(0, 500);
       throw new Error("\u043C\u043E\u0434\u0435\u043B\u044C \u043E\u0442\u0432\u0435\u0442\u0438\u043B\u0430 " + res.status + (body ? ": " + body : ""));
     }
-    const data = res.json;
-    const message = (_b = (_a = data.choices) == null ? void 0 : _a[0]) == null ? void 0 : _b.message;
-    if (!message) throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F");
-    return { content: (_c = message.content) != null ? _c : null, tool_calls: message.tool_calls };
+    return readTurn(res.json);
   }
   vaultFs() {
     const app = this.app;
@@ -781,6 +1138,11 @@ function iconButton(parent, icon, label) {
   });
   return button;
 }
+function modelKey(model) {
+  var _a;
+  const images = model.images === null ? "" : model.images ? "1" : "0";
+  return model.id + "\0" + ((_a = model.pay) != null ? _a : "") + "\0" + images;
+}
 function picker(parent) {
   const wrap = parent.createDiv({ cls: "agent-picker" });
   const select = wrap.createEl("select");
@@ -811,15 +1173,28 @@ var AgentView = class extends import_obsidian.ItemView {
     this.sendEl = null;
     this.providerEl = null;
     this.providerSignature = "";
-    this.modelEl = null;
+    this.modelTrigger = null;
+    this.modelLabel = null;
+    this.modelMenu = null;
+    this.modelOpen = false;
     this.modelSignature = "";
     this.chipEl = null;
     this.chipLabel = null;
+    this.chatLabel = null;
     this.modelState = null;
     this.modelLoading = "";
     this.chatEl = null;
     this.chatSignature = "";
     this.noteEl = null;
+    this.closeModelMenu = (event) => {
+      var _a, _b;
+      if (!this.modelOpen) return;
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (((_a = this.modelMenu) == null ? void 0 : _a.contains(target)) || ((_b = this.modelTrigger) == null ? void 0 : _b.contains(target))) return;
+      this.modelOpen = false;
+      this.syncModelSelect();
+    };
     this.plugin = plugin;
   }
   getViewType() {
@@ -839,38 +1214,51 @@ var AgentView = class extends import_obsidian.ItemView {
     this.noteEl = root.createDiv({ cls: "agent-note" });
     this.logEl = root.createDiv({ cls: "agent-log" });
     const chatRow = root.createDiv({ cls: "agent-chatbar" });
-    this.chatEl = picker(chatRow);
+    const chatPicker = chatRow.createDiv({ cls: "agent-chat-picker" });
+    this.chatLabel = chatPicker.createSpan({ cls: "agent-chat-label" });
+    chatPicker.createDiv({ cls: "agent-picker-mark", attr: { "aria-hidden": "true" } });
+    this.chatEl = chatPicker.createEl("select", { cls: "agent-chat-select", attr: { "aria-label": "\u0447\u0430\u0442" } });
     this.chatEl.addEventListener("change", () => {
       var _a, _b;
       const value = (_b = (_a = this.chatEl) == null ? void 0 : _a.value) != null ? _b : "";
       if (!value) return;
       void this.plugin.openSession(value);
     });
-    iconButton(chatRow, "plus", "\u043D\u043E\u0432\u044B\u0439 \u0447\u0430\u0442").addEventListener("click", () => void this.plugin.newChat());
-    iconButton(chatRow, "trash", "\u0443\u0431\u0440\u0430\u0442\u044C \u0447\u0430\u0442").addEventListener("click", () => void this.plugin.deleteSession());
+    const chatActions = chatRow.createDiv({ cls: "agent-chat-actions" });
+    iconButton(chatActions, "plus", "\u043D\u043E\u0432\u044B\u0439 \u0447\u0430\u0442").addEventListener("click", () => void this.plugin.newChat());
+    iconButton(chatActions, "trash", "\u0443\u0431\u0440\u0430\u0442\u044C \u0447\u0430\u0442").addEventListener("click", () => void this.plugin.deleteSession());
     const composer = root.createDiv({ cls: "agent-composer" });
-    const chips = composer.createDiv({ cls: "agent-chips" });
-    this.chipEl = chips.createDiv({ cls: "agent-chip" });
+    const context = composer.createDiv({ cls: "agent-context" });
+    iconButton(context, "at-sign", "\u0442\u0435\u043A\u0443\u0449\u0438\u0439 \u0444\u0430\u0439\u043B").addEventListener("click", () => void this.plugin.focusOpenNote());
+    this.chipEl = context.createDiv({ cls: "agent-chip" });
     this.chipLabel = this.chipEl.createSpan();
     const closeChip = iconButton(this.chipEl, "x", "\u0443\u0431\u0440\u0430\u0442\u044C \u0444\u0430\u0439\u043B");
     closeChip.addEventListener("click", () => void this.plugin.setFocus("", false));
     this.inputEl = composer.createEl("textarea", { attr: { rows: "3", placeholder: "\u0417\u0430\u0434\u0430\u043D\u0438\u0435 \u0434\u043B\u044F \u0437\u0430\u043C\u0435\u0442\u043A\u0438 \u0432 \u0444\u043E\u043A\u0443\u0441\u0435" } });
     const bar = composer.createDiv({ cls: "agent-composer-bar" });
-    iconButton(bar, "at-sign", "\u0442\u0435\u043A\u0443\u0449\u0438\u0439 \u0444\u0430\u0439\u043B").addEventListener("click", () => void this.plugin.focusOpenNote());
-    this.modelEl = picker(bar);
-    this.modelEl.addEventListener("change", () => {
-      var _a, _b;
-      const provider = this.plugin.activeProvider();
-      const value = (_b = (_a = this.modelEl) == null ? void 0 : _a.value.trim()) != null ? _b : "";
-      if (!provider || !value) return;
-      provider.model = value;
-      void this.plugin.saveSettings();
+    const modelWrap = bar.createDiv({ cls: "agent-model" });
+    this.modelTrigger = modelWrap.createDiv({ cls: "agent-picker agent-model-trigger", attr: { role: "button", tabindex: "0" } });
+    this.modelLabel = this.modelTrigger.createSpan({ cls: "agent-model-current" });
+    this.modelTrigger.createDiv({ cls: "agent-picker-mark", attr: { "aria-hidden": "true" } });
+    this.modelTrigger.addEventListener("click", () => {
+      this.modelOpen = !this.modelOpen;
+      this.syncModelSelect();
     });
+    this.modelTrigger.addEventListener("keydown", (event) => {
+      var _a;
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      (_a = this.modelTrigger) == null ? void 0 : _a.click();
+    });
+    this.modelMenu = composer.createDiv({ cls: "agent-model-menu", attr: { role: "listbox" } });
+    this.modelMenu.hidden = true;
+    document.addEventListener("pointerdown", this.closeModelMenu);
     this.providerEl = picker(bar);
     this.providerEl.addEventListener("change", () => {
       if (!this.providerEl) return;
       this.plugin.settings.activeId = this.providerEl.value;
       this.modelState = null;
+      this.modelOpen = false;
       void this.plugin.saveSettings();
       this.syncModelSelect();
       void this.loadChatModels();
@@ -881,6 +1269,7 @@ var AgentView = class extends import_obsidian.ItemView {
     this.paint();
   }
   async onClose() {
+    document.removeEventListener("pointerdown", this.closeModelMenu);
     if (this.plugin.view === this) this.plugin.view = null;
   }
   paint() {
@@ -899,7 +1288,7 @@ var AgentView = class extends import_obsidian.ItemView {
     this.syncChatSelect();
     const provider = this.plugin.activeProvider();
     const listed = ((_a = this.modelState) == null ? void 0 : _a.providerId) === (provider == null ? void 0 : provider.id);
-    if ((provider == null ? void 0 : provider.base.trim()) && provider.key.trim() && !listed && this.modelLoading !== provider.id) void this.loadChatModels();
+    if (provider && providerCanList(provider) && !listed && this.modelLoading !== provider.id) void this.loadChatModels();
     const session = this.plugin.activeSession();
     if (this.noteEl) {
       this.noteEl.hidden = !(session == null ? void 0 : session.imagesOmitted);
@@ -963,6 +1352,7 @@ var AgentView = class extends import_obsidian.ItemView {
     this.chipLabel.setText(name + current);
   }
   syncChatSelect() {
+    var _a, _b;
     const select = this.chatEl;
     if (!select) return;
     const sessions = this.plugin.sessions;
@@ -976,29 +1366,54 @@ var AgentView = class extends import_obsidian.ItemView {
     }
     const wanted = sessions.some((item) => item.id === this.plugin.sessionId) ? this.plugin.sessionId : "";
     if (select.value !== wanted) select.value = wanted;
+    const selected = Array.from(select.options).find((option) => option.value === select.value);
+    (_b = this.chatLabel) == null ? void 0 : _b.setText((_a = selected == null ? void 0 : selected.text) != null ? _a : "");
+  }
+  chooseModel(id) {
+    const provider = this.plugin.activeProvider();
+    if (!provider || !id) return;
+    provider.model = id;
+    this.modelOpen = false;
+    void this.plugin.saveSettings();
+    this.syncModelSelect();
   }
   syncModelSelect() {
     var _a, _b, _c;
-    const select = this.modelEl;
-    if (!select) return;
+    const menu = this.modelMenu;
+    const label = this.modelLabel;
+    if (!menu || !label || !this.modelTrigger) return;
     const provider = this.plugin.activeProvider();
-    const ids = provider && ((_a = this.modelState) == null ? void 0 : _a.providerId) === provider.id && "ids" in this.modelState ? this.modelState.ids : [];
+    const models = provider && ((_a = this.modelState) == null ? void 0 : _a.providerId) === provider.id && "models" in this.modelState ? this.modelState.models : [];
     const current = (_b = provider == null ? void 0 : provider.model.trim()) != null ? _b : "";
-    const placeholder = !provider ? "\u043D\u0435\u0442 \u043C\u043E\u0434\u0435\u043B\u0438" : !current && ids.length === 0 ? "\u043D\u0435\u0442 \u0441\u043F\u0438\u0441\u043A\u0430 \u043C\u043E\u0434\u0435\u043B\u0435\u0439" : !current ? "\u043C\u043E\u0434\u0435\u043B\u044C" : "";
-    const signature = ((_c = provider == null ? void 0 : provider.id) != null ? _c : "") + "\0" + placeholder + "\0" + current + "\0" + ids.join("\n");
+    const placeholder = !provider ? "\u043D\u0435\u0442 \u043C\u043E\u0434\u0435\u043B\u0438" : !current && models.length === 0 ? "\u043D\u0435\u0442 \u0441\u043F\u0438\u0441\u043A\u0430 \u043C\u043E\u0434\u0435\u043B\u0435\u0439" : !current ? "\u043C\u043E\u0434\u0435\u043B\u044C" : "";
+    const signature = ((_c = provider == null ? void 0 : provider.id) != null ? _c : "") + "\0" + placeholder + "\0" + current + "\0" + models.map(modelKey).join("\n");
+    const shown = current || placeholder;
+    const selected = models.find((model) => model.id === current);
+    const notes = selected ? modelNotes(selected) : "";
+    label.setText(shown);
+    const caption = notes ? shown + ", " + notes.split(" \xB7 ").join(", ") : shown;
+    this.modelTrigger.ariaLabel = caption;
+    (0, import_obsidian.setTooltip)(this.modelTrigger, caption);
     if (this.modelSignature !== signature) {
-      while (select.options.length > 0) select.remove(0);
-      if (placeholder) select.add(new Option(placeholder, ""));
-      if (current && !ids.includes(current)) select.add(new Option(current, current));
-      for (const id of ids) select.add(new Option(id, id));
+      menu.empty();
+      const rows = current && !models.some((model) => model.id === current) ? [{ id: current, pay: null, images: null }, ...models] : models;
+      if (rows.length === 0 && placeholder) menu.createDiv({ cls: "agent-model-row", text: placeholder });
+      for (const model of rows) {
+        const row = menu.createDiv({ cls: "agent-model-row", attr: { role: "option" } });
+        if (model.id === current) row.addClass("is-active");
+        row.createSpan({ cls: "agent-model-id", text: model.id });
+        const mark = modelNotes(model);
+        if (mark) row.createSpan({ cls: "agent-model-note", text: mark });
+        row.addEventListener("click", () => this.chooseModel(model.id));
+      }
       this.modelSignature = signature;
     }
-    const wanted = current && Array.from(select.options).some((option) => option.value === current) ? current : "";
-    if (select.value !== wanted) select.value = wanted;
+    menu.hidden = !this.modelOpen;
+    this.modelTrigger.ariaExpanded = this.modelOpen ? "true" : "false";
   }
   async loadChatModels() {
     const provider = this.plugin.activeProvider();
-    if (!provider || !provider.base.trim() || !provider.key.trim()) {
+    if (!provider || !providerCanList(provider)) {
       this.modelState = null;
       this.syncModelSelect();
       return;
@@ -1007,9 +1422,9 @@ var AgentView = class extends import_obsidian.ItemView {
     if (this.modelLoading === id) return;
     this.modelLoading = id;
     try {
-      const ids = await this.plugin.fetchModelIds(provider);
+      const models = await this.plugin.fetchModels(provider);
       if (this.modelLoading !== id) return;
-      this.modelState = { providerId: id, ids };
+      this.modelState = { providerId: id, models };
     } catch (err) {
       if (this.modelLoading !== id) return;
       const message = err instanceof Error ? err.message : String(err);
@@ -1041,7 +1456,21 @@ var AgentSettingTab = class extends import_obsidian.PluginSettingTab {
         this.plugin.paint();
         this.display();
       });
-    }).addButton((button) => button.setButtonText("\u0434\u043E\u0431\u0430\u0432\u0438\u0442\u044C").onClick(() => this.addProvider())).addButton((button) => button.setButtonText("\u0443\u0431\u0440\u0430\u0442\u044C").onClick(() => this.removeProvider()));
+    }).addButton((button) => button.setButtonText("\u0443\u0431\u0440\u0430\u0442\u044C").onClick(() => this.removeProvider()));
+    let picked = "";
+    new import_obsidian.Setting(containerEl).setName("\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440\u0430").setDesc("\u0410\u0434\u0440\u0435\u0441 \u0438\u0437\u0432\u0435\u0441\u0442\u043D\u044B\u0445 \u0441\u0435\u0440\u0432\u0438\u0441\u043E\u0432 \u043F\u043E\u0434\u0441\u0442\u0430\u0432\u0438\u0442\u0441\u044F \u0441\u0430\u043C. \u0421\u0432\u043E\u0439 \u2014 \u043F\u0443\u0441\u0442\u043E\u0439 \u0430\u0434\u0440\u0435\u0441 \u0438 \u043A\u043B\u044E\u0447. \u041B\u043E\u043A\u0430\u043B\u044C\u043D\u0430\u044F \u2014 \u0430\u0434\u0440\u0435\u0441 \u0441\u0435\u0440\u0432\u0435\u0440\u0430 \u0432 \u0441\u0435\u0442\u0438, \u043C\u043E\u0434\u0435\u043B\u044C \u043D\u0430 iPad \u043D\u0435 \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0435\u0442\u0441\u044F.").addDropdown((menu) => {
+      menu.addOption("", "\u0432\u044B\u0431\u0435\u0440\u0438");
+      for (const preset of PROVIDER_PRESETS) menu.addOption(preset.id, preset.name);
+      menu.onChange((value) => {
+        picked = value;
+      });
+    }).addButton((button) => button.setButtonText("\u0434\u043E\u0431\u0430\u0432\u0438\u0442\u044C").onClick(() => {
+      if (!picked) {
+        new import_obsidian.Notice("\u0432\u044B\u0431\u0435\u0440\u0438 \u043F\u0440\u0435\u0434\u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0443");
+        return;
+      }
+      void this.addProvider(picked);
+    }));
     if (!active) {
       new import_obsidian.Setting(containerEl).setDesc(providers.length ? "\u0432\u044B\u0431\u0435\u0440\u0438 \u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440\u0430" : "\u0434\u043E\u0431\u0430\u0432\u044C \u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440\u0430");
     } else {
@@ -1058,16 +1487,20 @@ var AgentSettingTab = class extends import_obsidian.PluginSettingTab {
     }));
   }
   providerFields(containerEl, provider) {
+    var _a;
     new import_obsidian.Setting(containerEl).setName("\u0418\u043C\u044F").addText((text) => text.setValue(provider.name).onChange(async (value) => {
       provider.name = value.trim();
       await this.plugin.saveSettings();
       this.plugin.paint();
     }));
-    new import_obsidian.Setting(containerEl).setName("\u0410\u0434\u0440\u0435\u0441 API").setDesc("OpenAI-\u0441\u043E\u0432\u043C\u0435\u0441\u0442\u0438\u043C\u044B\u0439 \u0430\u0434\u0440\u0435\u0441, \u0431\u0435\u0437 /chat/completions").addText((text) => text.setPlaceholder("https://api.openai.com/v1").setValue(provider.base).onChange(async (value) => {
-      provider.base = value.trim();
+    const preset = provider.preset ? presetById(provider.preset) : void 0;
+    new import_obsidian.Setting(containerEl).setName("\u0410\u0434\u0440\u0435\u0441 API").setDesc((_a = preset == null ? void 0 : preset.hint) != null ? _a : "OpenAI-\u0441\u043E\u0432\u043C\u0435\u0441\u0442\u0438\u043C\u044B\u0439 \u0430\u0434\u0440\u0435\u0441, \u0431\u0435\u0437 /chat/completions").addText((text) => text.setPlaceholder((preset == null ? void 0 : preset.id) === "local" ? "http://192.168.1.10:11434/v1" : "https://api.openai.com/v1").setValue(provider.base).onChange(async (value) => {
+      assignProviderBase(provider, value);
       await this.plugin.saveSettings();
     }));
-    new import_obsidian.Setting(containerEl).setName("\u041A\u043B\u044E\u0447").addText((text) => {
+    const keySetting = new import_obsidian.Setting(containerEl).setName("\u041A\u043B\u044E\u0447");
+    if (!providerNeedsKey(provider)) keySetting.setDesc("\u043C\u043E\u0436\u043D\u043E \u043E\u0441\u0442\u0430\u0432\u0438\u0442\u044C \u043F\u0443\u0441\u0442\u044B\u043C");
+    keySetting.addText((text) => {
       text.inputEl.type = "password";
       text.setValue(provider.key).onChange(async (value) => {
         provider.key = value;
@@ -1093,14 +1526,13 @@ var AgentSettingTab = class extends import_obsidian.PluginSettingTab {
     }));
     if (dropdown) void this.fillModels(modelSetting, dropdown, provider);
   }
-  async addProvider() {
-    const provider = {
-      id: newProviderId(),
-      name: "\u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440 " + (this.plugin.settings.providers.length + 1),
-      base: "",
-      key: "",
-      model: ""
-    };
+  async addProvider(presetId) {
+    const preset = presetById(presetId);
+    if (!preset) {
+      new import_obsidian.Notice("\u043D\u0435\u0442 \u0442\u0430\u043A\u043E\u0439 \u043F\u0440\u0435\u0434\u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438");
+      return;
+    }
+    const provider = providerFromPreset(preset, newProviderId());
     this.plugin.settings.providers.push(provider);
     this.plugin.settings.activeId = provider.id;
     await this.plugin.saveSettings();
@@ -1120,21 +1552,23 @@ var AgentSettingTab = class extends import_obsidian.PluginSettingTab {
     this.display();
   }
   async fillModels(setting, dropdown, provider) {
-    if (!provider.base.trim() || !provider.key.trim()) {
-      setting.setDesc("\u0443\u043A\u0430\u0436\u0438 \u0430\u0434\u0440\u0435\u0441 API \u0438 \u043A\u043B\u044E\u0447, \u0437\u0430\u0442\u0435\u043C \u043D\u0430\u0436\u043C\u0438 \xAB\u043E\u0431\u043D\u043E\u0432\u0438\u0442\u044C\xBB");
+    if (!providerCanList(provider)) {
+      setting.setDesc(providerNeedsKey(provider) ? "\u0443\u043A\u0430\u0436\u0438 \u0430\u0434\u0440\u0435\u0441 API \u0438 \u043A\u043B\u044E\u0447, \u0437\u0430\u0442\u0435\u043C \u043D\u0430\u0436\u043C\u0438 \xAB\u043E\u0431\u043D\u043E\u0432\u0438\u0442\u044C\xBB" : "\u0443\u043A\u0430\u0436\u0438 \u0430\u0434\u0440\u0435\u0441 API, \u0437\u0430\u0442\u0435\u043C \u043D\u0430\u0436\u043C\u0438 \xAB\u043E\u0431\u043D\u043E\u0432\u0438\u0442\u044C\xBB");
       return;
     }
     try {
-      const ids = await this.plugin.fetchModelIds(provider);
+      const models = await this.plugin.fetchModels(provider);
       if (this.plugin.settings.activeId !== provider.id) return;
       const current = provider.model.trim();
       dropdown.selectEl.length = 0;
       if (!current) dropdown.addOption("", "\u0432\u044B\u0431\u0435\u0440\u0438 \u043C\u043E\u0434\u0435\u043B\u044C");
-      else if (!ids.includes(current)) dropdown.addOption(current, current);
-      for (const id of ids) dropdown.addOption(id, id);
+      else if (!models.some((model) => model.id === current)) dropdown.addOption(current, current);
+      for (const model of models) dropdown.addOption(model.id, modelMenuLabel(model));
       dropdown.setValue(current);
-      const missing = current && !ids.includes(current) ? " \u0422\u0435\u043A\u0443\u0449\u0435\u0439 \u043C\u043E\u0434\u0435\u043B\u0438 \u043D\u0435\u0442 \u0432 \u0441\u043F\u0438\u0441\u043A\u0435 \u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440\u0430." : "";
-      setting.setDesc(ids.length + " \u043C\u043E\u0434\u0435\u043B\u0435\u0439. \u041D\u0443\u0436\u043D\u044B \u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442\u044B \u0438 \u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0438." + missing);
+      const missing = current && !models.some((model) => model.id === current) ? " \u0422\u0435\u043A\u0443\u0449\u0435\u0439 \u043C\u043E\u0434\u0435\u043B\u0438 \u043D\u0435\u0442 \u0432 \u0441\u043F\u0438\u0441\u043A\u0435 \u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440\u0430." : "";
+      const tagged = models.some((model) => model.pay !== null || model.images !== null);
+      const about = tagged ? " \u0412 \u0441\u043F\u0438\u0441\u043A\u0435 \u043F\u043E\u0434\u043F\u0438\u0441\u0430\u043D\u043E, \u043F\u043B\u0430\u0442\u043D\u0430\u044F \u043C\u043E\u0434\u0435\u043B\u044C \u0438\u043B\u0438 \u043D\u0435\u0442 \u0438 \u0447\u0438\u0442\u0430\u0435\u0442 \u043B\u0438 \u043E\u043D\u0430 \u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0438." : " \u041F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440 \u043D\u0435 \u043F\u0440\u0438\u0441\u043B\u0430\u043B \u0446\u0435\u043D\u0443 \u0438 \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u043A\u0443 \u043A\u0430\u0440\u0442\u0438\u043D\u043E\u043A.";
+      setting.setDesc(models.length + " \u043C\u043E\u0434\u0435\u043B\u0435\u0439." + about + missing);
     } catch (err) {
       if (this.plugin.settings.activeId !== provider.id) return;
       const message = err instanceof Error ? err.message : String(err);

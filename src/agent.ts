@@ -21,7 +21,7 @@ export type ToolOutput = { text: string; image?: ToolImage };
 
 export type ToolHandler = (name: string, args: Record<string, unknown>) => Promise<ToolOutput>;
 
-export type AssistantTurn = { content: string | null; tool_calls?: ToolCall[] };
+export type AssistantTurn = { content: string | null; tool_calls?: ToolCall[]; finishReason: string | null };
 
 export const TOOLS = [
   {
@@ -105,6 +105,28 @@ export function systemPrompt(activePath: string): string {
   ].join("\n");
 }
 
+const VISIBLE_TOOL = 240;
+
+export function visibleToolResult(name: string, text: string): string {
+  if (text.length <= VISIBLE_TOOL) return name + ": " + text;
+  return name + ": " + text.length + " символов";
+}
+
+export function readTurn(body: unknown): AssistantTurn {
+  if (!body || typeof body !== "object") throw new Error("в ответе нет сообщения");
+  const choices = (body as { choices?: unknown }).choices;
+  if (!Array.isArray(choices) || !choices[0] || typeof choices[0] !== "object") throw new Error("в ответе нет сообщения");
+  const choice = choices[0] as { finish_reason?: unknown; message?: unknown };
+  if (!choice.message || typeof choice.message !== "object") throw new Error("в ответе нет сообщения");
+  const message = choice.message as { content?: string | null; tool_calls?: ToolCall[] };
+  const reason = choice.finish_reason;
+  return {
+    content: message.content ?? null,
+    tool_calls: message.tool_calls,
+    finishReason: typeof reason === "string" && reason.trim() ? reason : null,
+  };
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("аргументы инструмента не объект");
@@ -124,6 +146,7 @@ export async function runAgent(input: {
   for (let step = 0; step < input.maxSteps; step++) {
     if (input.shouldStop?.()) throw new Error("остановлено");
     const turn = await input.post(messages);
+    input.onLine?.("finish: " + (turn.finishReason ?? "нет"));
     const calls = turn.tool_calls ?? [];
     if (calls.length === 0) {
       messages.push({ role: "assistant", content: turn.content ?? "" });
@@ -134,7 +157,8 @@ export async function runAgent(input: {
       if (input.shouldStop?.()) throw new Error("остановлено");
       if (!call.id) throw new Error("модель прислала вызов без id");
       const name = call.function?.name || "";
-      input.onLine?.("инструмент " + name);
+      const raw = call.function?.arguments;
+      input.onLine?.("инструмент " + name + ", аргумент " + (typeof raw === "string" ? raw.length + " символов" : "не строка"));
       let output: ToolOutput;
       try {
         const args = asRecord(JSON.parse(call.function?.arguments || "{}"));
@@ -143,6 +167,7 @@ export async function runAgent(input: {
         const message = err instanceof Error ? err.message : String(err);
         output = { text: "ошибка: " + message };
       }
+      input.onLine?.(visibleToolResult(name, output.text));
       messages.push({ role: "tool", tool_call_id: call.id, content: output.text });
       if (output.image) {
         messages.push({

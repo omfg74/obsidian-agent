@@ -1,8 +1,8 @@
 import { ItemView, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf, requestUrl, setIcon, setTooltip, type App, type DropdownComponent } from "obsidian";
-import { TOOLS, runAgent, systemPrompt, type ChatMessage } from "./agent.ts";
+import { readTurn, TOOLS, runAgent, systemPrompt, type ChatMessage } from "./agent.ts";
 import { newSession, sessionTitle, sessionsFromSaved, stripImages, type ChatLine, type Session } from "./chats.ts";
-import { modelIds } from "./models.ts";
-import { freshSettings, newProviderId, providerLabel, settingsFromSaved, type AgentSettings, type Provider } from "./settings.ts";
+import { listedModels, modelMenuLabel, modelNotes, type ListedModel } from "./models.ts";
+import { assignProviderBase, chatCompletionsUrl, freshSettings, modelsEndpoint, newProviderId, presetById, PROVIDER_PRESETS, providerCanList, providerFromPreset, providerLabel, providerNeedsKey, requestHeaders, settingsFromSaved, type AgentSettings, type Provider } from "./settings.ts";
 import { dispatchTool, type VaultFs } from "./vault.ts";
 
 const VIEW = "obsidian-agent";
@@ -168,21 +168,18 @@ export default class AgentPlugin extends Plugin {
     return this.settings.providers.find((item) => item.id === this.settings.activeId) ?? null;
   }
 
-  async fetchModelIds(provider: Provider): Promise<string[]> {
-    const base = provider.base.trim().replace(/\/$/, "");
-    const key = provider.key.trim();
-    if (!base || !key) throw new Error("укажи адрес API и ключ");
+  async fetchModels(provider: Provider): Promise<ListedModel[]> {
     const res = await requestUrl({
-      url: base + "/models",
+      url: modelsEndpoint(provider),
       method: "GET",
-      headers: { Authorization: "Bearer " + key },
+      headers: requestHeaders(provider, false),
       throw: false,
     });
     if (res.status < 200 || res.status >= 300) {
       const body = (res.text || "").slice(0, 500);
       throw new Error("список моделей ответил " + res.status + (body ? ": " + body : ""));
     }
-    return modelIds(res.json);
+    return listedModels(res.json);
   }
 
   async saveSettings() {
@@ -228,10 +225,9 @@ export default class AgentPlugin extends Plugin {
       this.push({ kind: "error", text: "выбери провайдера в настройках плагина" });
       return;
     }
-    const key = provider.key.trim();
     const model = provider.model.trim();
-    const base = provider.base.trim().replace(/\/$/, "");
-    if (!key) {
+    const base = provider.base.trim();
+    if (providerNeedsKey(provider) && !provider.key.trim()) {
       this.push({ kind: "error", text: "укажи ключ в настройках плагина" });
       return;
     }
@@ -256,7 +252,7 @@ export default class AgentPlugin extends Plugin {
         maxSteps: this.settings.maxSteps,
         shouldStop: () => this.stop,
         onLine: (line) => this.push({ kind: "tool", text: line }),
-        post: (batch) => this.post(base, key, model, batch),
+        post: (batch) => this.post(provider, model, batch),
         callTool: (name, args) => dispatchTool(this.vaultFs(), name, args),
       });
       const last = messages[messages.length - 1];
@@ -275,11 +271,11 @@ export default class AgentPlugin extends Plugin {
     }
   }
 
-  private async post(base: string, key: string, model: string, messages: ChatMessage[]) {
+  private async post(provider: Provider, model: string, messages: ChatMessage[]) {
     const res = await requestUrl({
-      url: base + "/chat/completions",
+      url: chatCompletionsUrl(provider),
       method: "POST",
-      headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" },
+      headers: requestHeaders(provider, true),
       body: JSON.stringify({ model, messages, tools: TOOLS }),
       throw: false,
     });
@@ -287,10 +283,7 @@ export default class AgentPlugin extends Plugin {
       const body = (res.text || "").slice(0, 500);
       throw new Error("модель ответила " + res.status + (body ? ": " + body : ""));
     }
-    const data = res.json as { choices?: { message?: { content?: string | null; tool_calls?: { id: string; type: "function"; function: { name: string; arguments: string } }[] } }[] };
-    const message = data.choices?.[0]?.message;
-    if (!message) throw new Error("в ответе нет сообщения");
-    return { content: message.content ?? null, tool_calls: message.tool_calls };
+    return readTurn(res.json);
   }
 
   private vaultFs(): VaultFs {
@@ -359,6 +352,11 @@ function iconButton(parent: HTMLElement, icon: string, label: string): HTMLEleme
   return button;
 }
 
+function modelKey(model: ListedModel): string {
+  const images = model.images === null ? "" : model.images ? "1" : "0";
+  return model.id + "\0" + (model.pay ?? "") + "\0" + images;
+}
+
 function picker(parent: HTMLElement): HTMLSelectElement {
   const wrap = parent.createDiv({ cls: "agent-picker" });
   const select = wrap.createEl("select");
@@ -389,11 +387,15 @@ class AgentView extends ItemView {
   sendEl: HTMLElement | null = null;
   providerEl: HTMLSelectElement | null = null;
   providerSignature = "";
-  modelEl: HTMLSelectElement | null = null;
+  modelTrigger: HTMLElement | null = null;
+  modelLabel: HTMLElement | null = null;
+  modelMenu: HTMLElement | null = null;
+  modelOpen = false;
   modelSignature = "";
   chipEl: HTMLElement | null = null;
   chipLabel: HTMLElement | null = null;
-  modelState: { providerId: string; ids: string[] } | { providerId: string; error: string } | null = null;
+  chatLabel: HTMLElement | null = null;
+  modelState: { providerId: string; models: ListedModel[] } | { providerId: string; error: string } | null = null;
   modelLoading = "";
   chatEl: HTMLSelectElement | null = null;
   chatSignature = "";
@@ -424,36 +426,49 @@ class AgentView extends ItemView {
     this.noteEl = root.createDiv({ cls: "agent-note" });
     this.logEl = root.createDiv({ cls: "agent-log" });
     const chatRow = root.createDiv({ cls: "agent-chatbar" });
-    this.chatEl = picker(chatRow);
+    const chatPicker = chatRow.createDiv({ cls: "agent-chat-picker" });
+    this.chatLabel = chatPicker.createSpan({ cls: "agent-chat-label" });
+    chatPicker.createDiv({ cls: "agent-picker-mark", attr: { "aria-hidden": "true" } });
+    this.chatEl = chatPicker.createEl("select", { cls: "agent-chat-select", attr: { "aria-label": "чат" } });
     this.chatEl.addEventListener("change", () => {
       const value = this.chatEl?.value ?? "";
       if (!value) return;
       void this.plugin.openSession(value);
     });
-    iconButton(chatRow, "plus", "новый чат").addEventListener("click", () => void this.plugin.newChat());
-    iconButton(chatRow, "trash", "убрать чат").addEventListener("click", () => void this.plugin.deleteSession());
+    const chatActions = chatRow.createDiv({ cls: "agent-chat-actions" });
+    iconButton(chatActions, "plus", "новый чат").addEventListener("click", () => void this.plugin.newChat());
+    iconButton(chatActions, "trash", "убрать чат").addEventListener("click", () => void this.plugin.deleteSession());
     const composer = root.createDiv({ cls: "agent-composer" });
-    const chips = composer.createDiv({ cls: "agent-chips" });
-    this.chipEl = chips.createDiv({ cls: "agent-chip" });
+    const context = composer.createDiv({ cls: "agent-context" });
+    iconButton(context, "at-sign", "текущий файл").addEventListener("click", () => void this.plugin.focusOpenNote());
+    this.chipEl = context.createDiv({ cls: "agent-chip" });
     this.chipLabel = this.chipEl.createSpan();
     const closeChip = iconButton(this.chipEl, "x", "убрать файл");
     closeChip.addEventListener("click", () => void this.plugin.setFocus("", false));
     this.inputEl = composer.createEl("textarea", { attr: { rows: "3", placeholder: "Задание для заметки в фокусе" } });
     const bar = composer.createDiv({ cls: "agent-composer-bar" });
-    iconButton(bar, "at-sign", "текущий файл").addEventListener("click", () => void this.plugin.focusOpenNote());
-    this.modelEl = picker(bar);
-    this.modelEl.addEventListener("change", () => {
-      const provider = this.plugin.activeProvider();
-      const value = this.modelEl?.value.trim() ?? "";
-      if (!provider || !value) return;
-      provider.model = value;
-      void this.plugin.saveSettings();
+    const modelWrap = bar.createDiv({ cls: "agent-model" });
+    this.modelTrigger = modelWrap.createDiv({ cls: "agent-picker agent-model-trigger", attr: { role: "button", tabindex: "0" } });
+    this.modelLabel = this.modelTrigger.createSpan({ cls: "agent-model-current" });
+    this.modelTrigger.createDiv({ cls: "agent-picker-mark", attr: { "aria-hidden": "true" } });
+    this.modelTrigger.addEventListener("click", () => {
+      this.modelOpen = !this.modelOpen;
+      this.syncModelSelect();
     });
+    this.modelTrigger.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      this.modelTrigger?.click();
+    });
+    this.modelMenu = composer.createDiv({ cls: "agent-model-menu", attr: { role: "listbox" } });
+    this.modelMenu.hidden = true;
+    document.addEventListener("pointerdown", this.closeModelMenu);
     this.providerEl = picker(bar);
     this.providerEl.addEventListener("change", () => {
       if (!this.providerEl) return;
       this.plugin.settings.activeId = this.providerEl.value;
       this.modelState = null;
+      this.modelOpen = false;
       void this.plugin.saveSettings();
       this.syncModelSelect();
       void this.loadChatModels();
@@ -465,8 +480,18 @@ class AgentView extends ItemView {
   }
 
   async onClose() {
+    document.removeEventListener("pointerdown", this.closeModelMenu);
     if (this.plugin.view === this) this.plugin.view = null;
   }
+
+  private readonly closeModelMenu = (event: PointerEvent) => {
+    if (!this.modelOpen) return;
+    const target = event.target;
+    if (!(target instanceof Node)) return;
+    if (this.modelMenu?.contains(target) || this.modelTrigger?.contains(target)) return;
+    this.modelOpen = false;
+    this.syncModelSelect();
+  };
 
   paint() {
     if (!this.logEl || !this.sendEl) return;
@@ -483,7 +508,7 @@ class AgentView extends ItemView {
     this.syncChatSelect();
     const provider = this.plugin.activeProvider();
     const listed = this.modelState?.providerId === provider?.id;
-    if (provider?.base.trim() && provider.key.trim() && !listed && this.modelLoading !== provider.id) void this.loadChatModels();
+    if (provider && providerCanList(provider) && !listed && this.modelLoading !== provider.id) void this.loadChatModels();
     const session = this.plugin.activeSession();
     if (this.noteEl) {
       this.noteEl.hidden = !session?.imagesOmitted;
@@ -563,30 +588,56 @@ class AgentView extends ItemView {
     }
     const wanted = sessions.some((item) => item.id === this.plugin.sessionId) ? this.plugin.sessionId : "";
     if (select.value !== wanted) select.value = wanted;
+    const selected = Array.from(select.options).find((option) => option.value === select.value);
+    this.chatLabel?.setText(selected?.text ?? "");
+  }
+
+  private chooseModel(id: string) {
+    const provider = this.plugin.activeProvider();
+    if (!provider || !id) return;
+    provider.model = id;
+    this.modelOpen = false;
+    void this.plugin.saveSettings();
+    this.syncModelSelect();
   }
 
   private syncModelSelect() {
-    const select = this.modelEl;
-    if (!select) return;
+    const menu = this.modelMenu;
+    const label = this.modelLabel;
+    if (!menu || !label || !this.modelTrigger) return;
     const provider = this.plugin.activeProvider();
-    const ids = provider && this.modelState?.providerId === provider.id && "ids" in this.modelState ? this.modelState.ids : [];
+    const models = provider && this.modelState?.providerId === provider.id && "models" in this.modelState ? this.modelState.models : [];
     const current = provider?.model.trim() ?? "";
-    const placeholder = !provider ? "нет модели" : !current && ids.length === 0 ? "нет списка моделей" : !current ? "модель" : "";
-    const signature = (provider?.id ?? "") + "\0" + placeholder + "\0" + current + "\0" + ids.join("\n");
+    const placeholder = !provider ? "нет модели" : !current && models.length === 0 ? "нет списка моделей" : !current ? "модель" : "";
+    const signature = (provider?.id ?? "") + "\0" + placeholder + "\0" + current + "\0" + models.map(modelKey).join("\n");
+    const shown = current || placeholder;
+    const selected = models.find((model) => model.id === current);
+    const notes = selected ? modelNotes(selected) : "";
+    label.setText(shown);
+    const caption = notes ? shown + ", " + notes.split(" · ").join(", ") : shown;
+    this.modelTrigger.ariaLabel = caption;
+    setTooltip(this.modelTrigger, caption);
     if (this.modelSignature !== signature) {
-      while (select.options.length > 0) select.remove(0);
-      if (placeholder) select.add(new Option(placeholder, ""));
-      if (current && !ids.includes(current)) select.add(new Option(current, current));
-      for (const id of ids) select.add(new Option(id, id));
+      menu.empty();
+      const rows = current && !models.some((model) => model.id === current) ? [{ id: current, pay: null, images: null }, ...models] : models;
+      if (rows.length === 0 && placeholder) menu.createDiv({ cls: "agent-model-row", text: placeholder });
+      for (const model of rows) {
+        const row = menu.createDiv({ cls: "agent-model-row", attr: { role: "option" } });
+        if (model.id === current) row.addClass("is-active");
+        row.createSpan({ cls: "agent-model-id", text: model.id });
+        const mark = modelNotes(model);
+        if (mark) row.createSpan({ cls: "agent-model-note", text: mark });
+        row.addEventListener("click", () => this.chooseModel(model.id));
+      }
       this.modelSignature = signature;
     }
-    const wanted = current && Array.from(select.options).some((option) => option.value === current) ? current : "";
-    if (select.value !== wanted) select.value = wanted;
+    menu.hidden = !this.modelOpen;
+    this.modelTrigger.ariaExpanded = this.modelOpen ? "true" : "false";
   }
 
   private async loadChatModels() {
     const provider = this.plugin.activeProvider();
-    if (!provider || !provider.base.trim() || !provider.key.trim()) {
+    if (!provider || !providerCanList(provider)) {
       this.modelState = null;
       this.syncModelSelect();
       return;
@@ -595,9 +646,9 @@ class AgentView extends ItemView {
     if (this.modelLoading === id) return;
     this.modelLoading = id;
     try {
-      const ids = await this.plugin.fetchModelIds(provider);
+      const models = await this.plugin.fetchModels(provider);
       if (this.modelLoading !== id) return;
-      this.modelState = { providerId: id, ids };
+      this.modelState = { providerId: id, models };
     } catch (err) {
       if (this.modelLoading !== id) return;
       const message = err instanceof Error ? err.message : String(err);
@@ -635,8 +686,25 @@ class AgentSettingTab extends PluginSettingTab {
           this.display();
         });
       })
-      .addButton((button) => button.setButtonText("добавить").onClick(() => this.addProvider()))
       .addButton((button) => button.setButtonText("убрать").onClick(() => this.removeProvider()));
+    let picked = "";
+    new Setting(containerEl)
+      .setName("Добавить провайдера")
+      .setDesc("Адрес известных сервисов подставится сам. Свой — пустой адрес и ключ. Локальная — адрес сервера в сети, модель на iPad не запускается.")
+      .addDropdown((menu) => {
+        menu.addOption("", "выбери");
+        for (const preset of PROVIDER_PRESETS) menu.addOption(preset.id, preset.name);
+        menu.onChange((value) => {
+          picked = value;
+        });
+      })
+      .addButton((button) => button.setButtonText("добавить").onClick(() => {
+        if (!picked) {
+          new Notice("выбери преднастройку");
+          return;
+        }
+        void this.addProvider(picked);
+      }));
     if (!active) {
       new Setting(containerEl).setDesc(providers.length ? "выбери провайдера" : "добавь провайдера");
     } else {
@@ -663,16 +731,17 @@ class AgentSettingTab extends PluginSettingTab {
         await this.plugin.saveSettings();
         this.plugin.paint();
       }));
+    const preset = provider.preset ? presetById(provider.preset) : undefined;
     new Setting(containerEl)
       .setName("Адрес API")
-      .setDesc("OpenAI-совместимый адрес, без /chat/completions")
-      .addText((text) => text.setPlaceholder("https://api.openai.com/v1").setValue(provider.base).onChange(async (value) => {
-        provider.base = value.trim();
+      .setDesc(preset?.hint ?? "OpenAI-совместимый адрес, без /chat/completions")
+      .addText((text) => text.setPlaceholder(preset?.id === "local" ? "http://192.168.1.10:11434/v1" : "https://api.openai.com/v1").setValue(provider.base).onChange(async (value) => {
+        assignProviderBase(provider, value);
         await this.plugin.saveSettings();
       }));
-    new Setting(containerEl)
-      .setName("Ключ")
-      .addText((text) => {
+    const keySetting = new Setting(containerEl).setName("Ключ");
+    if (!providerNeedsKey(provider)) keySetting.setDesc("можно оставить пустым");
+    keySetting.addText((text) => {
         text.inputEl.type = "password";
         text.setValue(provider.key).onChange(async (value) => {
           provider.key = value;
@@ -699,14 +768,13 @@ class AgentSettingTab extends PluginSettingTab {
     if (dropdown) void this.fillModels(modelSetting, dropdown, provider);
   }
 
-  private async addProvider() {
-    const provider: Provider = {
-      id: newProviderId(),
-      name: "провайдер " + (this.plugin.settings.providers.length + 1),
-      base: "",
-      key: "",
-      model: "",
-    };
+  private async addProvider(presetId: string) {
+    const preset = presetById(presetId);
+    if (!preset) {
+      new Notice("нет такой преднастройки");
+      return;
+    }
+    const provider = providerFromPreset(preset, newProviderId());
     this.plugin.settings.providers.push(provider);
     this.plugin.settings.activeId = provider.id;
     await this.plugin.saveSettings();
@@ -728,21 +796,25 @@ class AgentSettingTab extends PluginSettingTab {
   }
 
   private async fillModels(setting: Setting, dropdown: DropdownComponent, provider: Provider) {
-    if (!provider.base.trim() || !provider.key.trim()) {
-      setting.setDesc("укажи адрес API и ключ, затем нажми «обновить»");
+    if (!providerCanList(provider)) {
+      setting.setDesc(providerNeedsKey(provider) ? "укажи адрес API и ключ, затем нажми «обновить»" : "укажи адрес API, затем нажми «обновить»");
       return;
     }
     try {
-      const ids = await this.plugin.fetchModelIds(provider);
+      const models = await this.plugin.fetchModels(provider);
       if (this.plugin.settings.activeId !== provider.id) return;
       const current = provider.model.trim();
       dropdown.selectEl.length = 0;
       if (!current) dropdown.addOption("", "выбери модель");
-      else if (!ids.includes(current)) dropdown.addOption(current, current);
-      for (const id of ids) dropdown.addOption(id, id);
+      else if (!models.some((model) => model.id === current)) dropdown.addOption(current, current);
+      for (const model of models) dropdown.addOption(model.id, modelMenuLabel(model));
       dropdown.setValue(current);
-      const missing = current && !ids.includes(current) ? " Текущей модели нет в списке провайдера." : "";
-      setting.setDesc(ids.length + " моделей. Нужны инструменты и картинки." + missing);
+      const missing = current && !models.some((model) => model.id === current) ? " Текущей модели нет в списке провайдера." : "";
+      const tagged = models.some((model) => model.pay !== null || model.images !== null);
+      const about = tagged
+        ? " В списке подписано, платная модель или нет и читает ли она картинки."
+        : " Провайдер не прислал цену и поддержку картинок.";
+      setting.setDesc(models.length + " моделей." + about + missing);
     } catch (err) {
       if (this.plugin.settings.activeId !== provider.id) return;
       const message = err instanceof Error ? err.message : String(err);
