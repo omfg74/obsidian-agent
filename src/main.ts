@@ -1,28 +1,15 @@
 import { ItemView, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf, requestUrl, type App, type DropdownComponent } from "obsidian";
 import { TOOLS, runAgent, systemPrompt, type ChatMessage } from "./agent.ts";
 import { modelIds } from "./models.ts";
+import { freshSettings, newProviderId, settingsFromSaved, type AgentSettings, type Provider } from "./settings.ts";
 import { dispatchTool, type VaultFs } from "./vault.ts";
 
 const VIEW = "obsidian-agent";
 
-interface AgentSettings {
-  base: string;
-  key: string;
-  model: string;
-  maxSteps: number;
-}
-
-const DEFAULT_SETTINGS: AgentSettings = {
-  base: "https://api.openai.com/v1",
-  key: "",
-  model: "gpt-4o",
-  maxSteps: 8,
-};
-
 type Line = { kind: "user" | "assistant" | "tool" | "error"; text: string };
 
 export default class AgentPlugin extends Plugin {
-  settings: AgentSettings = DEFAULT_SETTINGS;
+  settings: AgentSettings = freshSettings();
   lines: Line[] = [];
   history: ChatMessage[] = [];
   running = false;
@@ -39,12 +26,12 @@ export default class AgentPlugin extends Plugin {
 
   async loadSettings() {
     const saved = await this.loadData();
-    if (!saved || typeof saved !== "object") return;
-    const data = saved as Partial<AgentSettings>;
-    if (typeof data.base === "string" && data.base.trim()) this.settings.base = data.base.trim();
-    if (typeof data.key === "string") this.settings.key = data.key;
-    if (typeof data.model === "string" && data.model.trim()) this.settings.model = data.model.trim();
-    if (typeof data.maxSteps === "number" && Number.isInteger(data.maxSteps) && data.maxSteps >= 1) this.settings.maxSteps = data.maxSteps;
+    this.settings = settingsFromSaved(saved);
+    if (saved && typeof saved === "object" && !("providers" in saved)) await this.saveSettings();
+  }
+
+  activeProvider(): Provider | null {
+    return this.settings.providers.find((item) => item.id === this.settings.activeId) ?? null;
   }
 
   async saveSettings() {
@@ -83,9 +70,14 @@ export default class AgentPlugin extends Plugin {
 
   async ask(task: string) {
     if (this.running) return;
-    const key = this.settings.key.trim();
-    const model = this.settings.model.trim();
-    const base = this.settings.base.trim().replace(/\/$/, "");
+    const provider = this.activeProvider();
+    if (!provider) {
+      this.push({ kind: "error", text: "выбери провайдера в настройках плагина" });
+      return;
+    }
+    const key = provider.key.trim();
+    const model = provider.model.trim();
+    const base = provider.base.trim().replace(/\/$/, "");
     if (!key) {
       this.push({ kind: "error", text: "укажи ключ в настройках плагина" });
       return;
@@ -209,6 +201,8 @@ class AgentView extends ItemView {
   logEl: HTMLElement | null = null;
   inputEl: HTMLTextAreaElement | null = null;
   sendEl: HTMLButtonElement | null = null;
+  providerEl: HTMLSelectElement | null = null;
+  providerSignature = "";
 
   constructor(leaf: WorkspaceLeaf, plugin: AgentPlugin) {
     super(leaf);
@@ -232,6 +226,12 @@ class AgentView extends ItemView {
     const root = this.contentEl;
     root.empty();
     root.addClass("agent-root");
+    this.providerEl = root.createEl("select", { cls: "agent-provider" });
+    this.providerEl.addEventListener("change", () => {
+      if (!this.providerEl) return;
+      this.plugin.settings.activeId = this.providerEl.value;
+      void this.plugin.saveSettings();
+    });
     this.logEl = root.createDiv({ cls: "agent-log" });
     this.inputEl = root.createEl("textarea", { attr: { rows: "4", placeholder: "Что сделать с заметкой" } });
     const row = root.createDiv({ cls: "agent-row" });
@@ -248,6 +248,7 @@ class AgentView extends ItemView {
 
   paint() {
     if (!this.logEl || !this.sendEl) return;
+    this.syncProviderSelect();
     this.logEl.empty();
     for (const line of this.plugin.lines) {
       this.logEl.createDiv({ cls: "agent-line agent-" + line.kind, text: line.text });
@@ -266,6 +267,22 @@ class AgentView extends ItemView {
     if (this.inputEl) this.inputEl.value = "";
     void this.plugin.ask(text);
   }
+
+  private syncProviderSelect() {
+    const select = this.providerEl;
+    if (!select) return;
+    const providers = this.plugin.settings.providers;
+    const signature = providers.map((item) => item.id + "\0" + item.name).join("\n");
+    if (this.providerSignature !== signature) {
+      while (select.options.length > 0) select.remove(0);
+      const known = providers.some((item) => item.id === this.plugin.settings.activeId);
+      if (!known) select.add(new Option(providers.length === 0 ? "нет провайдера" : "выбери провайдера", ""));
+      for (const item of providers) select.add(new Option(item.name || item.id, item.id));
+      this.providerSignature = signature;
+    }
+    const wanted = providers.some((item) => item.id === this.plugin.settings.activeId) ? this.plugin.settings.activeId : "";
+    if (select.value !== wanted) select.value = wanted;
+  }
 }
 
 class AgentSettingTab extends PluginSettingTab {
@@ -279,39 +296,27 @@ class AgentSettingTab extends PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
+    const providers = this.plugin.settings.providers;
+    const active = this.plugin.activeProvider();
     new Setting(containerEl)
-      .setName("Адрес API")
-      .setDesc("OpenAI-совместимый адрес, без /chat/completions")
-      .addText((text) => text.setPlaceholder(DEFAULT_SETTINGS.base).setValue(this.plugin.settings.base).onChange(async (value) => {
-        this.plugin.settings.base = value.trim();
-        await this.plugin.saveSettings();
-      }));
-    new Setting(containerEl)
-      .setName("Ключ")
-      .addText((text) => {
-        text.inputEl.type = "password";
-        text.setValue(this.plugin.settings.key).onChange(async (value) => {
-          this.plugin.settings.key = value;
+      .setName("Провайдер")
+      .addDropdown((menu) => {
+        if (!active) menu.addOption("", providers.length ? "выбери провайдера" : "нет провайдера");
+        for (const item of providers) menu.addOption(item.id, item.name || item.id);
+        menu.setValue(active?.id ?? "").onChange(async (value) => {
+          this.plugin.settings.activeId = value;
           await this.plugin.saveSettings();
+          this.plugin.paint();
+          this.display();
         });
-      });
-    const modelSetting = new Setting(containerEl).setName("Модель").setDesc("загружаю список…");
-    let dropdown: DropdownComponent | null = null;
-    modelSetting.addDropdown((menu) => {
-      dropdown = menu;
-      const current = this.plugin.settings.model.trim();
-      if (current) menu.addOption(current, current);
-      menu.setValue(current).onChange(async (value) => {
-        if (!value.trim()) return;
-        this.plugin.settings.model = value.trim();
-        await this.plugin.saveSettings();
-      });
-    });
-    modelSetting.addButton((button) => button.setButtonText("обновить").onClick(() => {
-      if (!dropdown) return;
-      void this.fillModels(modelSetting, dropdown);
-    }));
-    if (dropdown) void this.fillModels(modelSetting, dropdown);
+      })
+      .addButton((button) => button.setButtonText("добавить").onClick(() => this.addProvider()))
+      .addButton((button) => button.setButtonText("убрать").onClick(() => this.removeProvider()));
+    if (!active) {
+      new Setting(containerEl).setDesc(providers.length ? "выбери провайдера" : "добавь провайдера");
+    } else {
+      this.providerFields(containerEl, active);
+    }
     new Setting(containerEl)
       .setName("Шагов за ответ")
       .addText((text) => text.setValue(String(this.plugin.settings.maxSteps)).onChange(async (value) => {
@@ -325,9 +330,80 @@ class AgentSettingTab extends PluginSettingTab {
       }));
   }
 
-  private async fillModels(setting: Setting, dropdown: DropdownComponent) {
-    const base = this.plugin.settings.base.trim().replace(/\/$/, "");
-    const key = this.plugin.settings.key.trim();
+  private providerFields(containerEl: HTMLElement, provider: Provider) {
+    new Setting(containerEl)
+      .setName("Имя")
+      .addText((text) => text.setValue(provider.name).onChange(async (value) => {
+        provider.name = value.trim();
+        await this.plugin.saveSettings();
+        this.plugin.paint();
+      }));
+    new Setting(containerEl)
+      .setName("Адрес API")
+      .setDesc("OpenAI-совместимый адрес, без /chat/completions")
+      .addText((text) => text.setPlaceholder("https://api.openai.com/v1").setValue(provider.base).onChange(async (value) => {
+        provider.base = value.trim();
+        await this.plugin.saveSettings();
+      }));
+    new Setting(containerEl)
+      .setName("Ключ")
+      .addText((text) => {
+        text.inputEl.type = "password";
+        text.setValue(provider.key).onChange(async (value) => {
+          provider.key = value;
+          await this.plugin.saveSettings();
+        });
+      });
+    const modelSetting = new Setting(containerEl).setName("Модель").setDesc("загружаю список…");
+    let dropdown: DropdownComponent | null = null;
+    modelSetting.addDropdown((menu) => {
+      dropdown = menu;
+      const current = provider.model.trim();
+      if (current) menu.addOption(current, current);
+      menu.setValue(current).onChange(async (value) => {
+        if (!value.trim()) return;
+        provider.model = value.trim();
+        await this.plugin.saveSettings();
+      });
+    });
+    modelSetting.addButton((button) => button.setButtonText("обновить").onClick(() => {
+      if (!dropdown) return;
+      void this.fillModels(modelSetting, dropdown, provider);
+    }));
+    if (dropdown) void this.fillModels(modelSetting, dropdown, provider);
+  }
+
+  private async addProvider() {
+    const provider: Provider = {
+      id: newProviderId(),
+      name: "провайдер " + (this.plugin.settings.providers.length + 1),
+      base: "",
+      key: "",
+      model: "",
+    };
+    this.plugin.settings.providers.push(provider);
+    this.plugin.settings.activeId = provider.id;
+    await this.plugin.saveSettings();
+    this.plugin.paint();
+    this.display();
+  }
+
+  private async removeProvider() {
+    const current = this.plugin.activeProvider();
+    if (!current) {
+      new Notice("выбери провайдера");
+      return;
+    }
+    this.plugin.settings.providers = this.plugin.settings.providers.filter((item) => item.id !== current.id);
+    this.plugin.settings.activeId = "";
+    await this.plugin.saveSettings();
+    this.plugin.paint();
+    this.display();
+  }
+
+  private async fillModels(setting: Setting, dropdown: DropdownComponent, provider: Provider) {
+    const base = provider.base.trim().replace(/\/$/, "");
+    const key = provider.key.trim();
     if (!base || !key) {
       setting.setDesc("укажи адрес API и ключ, затем нажми «обновить»");
       return;
@@ -339,12 +415,14 @@ class AgentSettingTab extends PluginSettingTab {
         headers: { Authorization: "Bearer " + key },
         throw: false,
       });
+      if (this.plugin.settings.activeId !== provider.id) return;
       if (res.status < 200 || res.status >= 300) {
         const body = (res.text || "").slice(0, 500);
         throw new Error("список моделей ответил " + res.status + (body ? ": " + body : ""));
       }
       const ids = modelIds(res.json);
-      const current = this.plugin.settings.model.trim();
+      if (this.plugin.settings.activeId !== provider.id) return;
+      const current = provider.model.trim();
       dropdown.selectEl.length = 0;
       if (!current) dropdown.addOption("", "выбери модель");
       else if (!ids.includes(current)) dropdown.addOption(current, current);
@@ -353,6 +431,7 @@ class AgentSettingTab extends PluginSettingTab {
       const missing = current && !ids.includes(current) ? " Текущей модели нет в списке провайдера." : "";
       setting.setDesc(ids.length + " моделей. Нужны инструменты и картинки." + missing);
     } catch (err) {
+      if (this.plugin.settings.activeId !== provider.id) return;
       const message = err instanceof Error ? err.message : String(err);
       setting.setDesc(message);
       new Notice(message);

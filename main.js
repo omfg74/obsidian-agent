@@ -167,6 +167,71 @@ function modelIds(body) {
   return ids;
 }
 
+// src/settings.ts
+function freshSettings() {
+  return {
+    providers: [{ id: "openai", name: "OpenAI", base: "https://api.openai.com/v1", key: "", model: "gpt-4o" }],
+    activeId: "openai",
+    maxSteps: 8
+  };
+}
+function newProviderId() {
+  if (typeof crypto.randomUUID !== "function") throw new Error("\u043D\u0435\u0442 crypto.randomUUID");
+  return crypto.randomUUID();
+}
+function settingsFromSaved(saved) {
+  if (!saved || typeof saved !== "object") return freshSettings();
+  const data = saved;
+  const maxSteps = readSteps(data.maxSteps);
+  if ("providers" in data) {
+    const providers = readProviders(data.providers);
+    const activeId = typeof data.activeId === "string" ? data.activeId : "";
+    return { providers, activeId, maxSteps };
+  }
+  if ("base" in data || "key" in data || "model" in data) {
+    const provider = {
+      id: "saved",
+      name: "\u043E\u0441\u043D\u043E\u0432\u043D\u043E\u0439",
+      base: typeof data.base === "string" ? data.base.trim() : "",
+      key: typeof data.key === "string" ? data.key : "",
+      model: typeof data.model === "string" ? data.model.trim() : ""
+    };
+    return { providers: [provider], activeId: provider.id, maxSteps };
+  }
+  return { ...freshSettings(), maxSteps };
+}
+function readSteps(value) {
+  if (value === void 0) return 8;
+  if (typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 30) return value;
+  throw new Error("\u0448\u0430\u0433\u0438 \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0430\u0445 \u043F\u043E\u0432\u0440\u0435\u0436\u0434\u0435\u043D\u044B");
+}
+function readProviders(value) {
+  if (!Array.isArray(value)) throw new Error("\u0441\u043F\u0438\u0441\u043E\u043A \u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440\u043E\u0432 \u043F\u043E\u0432\u0440\u0435\u0436\u0434\u0451\u043D");
+  const ids = /* @__PURE__ */ new Set();
+  return value.map((item) => {
+    const provider = readProvider(item);
+    if (ids.has(provider.id)) throw new Error("\u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440\u044B \u0441 \u043E\u0434\u0438\u043D\u0430\u043A\u043E\u0432\u044B\u043C id");
+    ids.add(provider.id);
+    return provider;
+  });
+}
+function readProvider(item) {
+  if (!item || typeof item !== "object") throw new Error("\u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440 \u043F\u043E\u0432\u0440\u0435\u0436\u0434\u0451\u043D");
+  const row = item;
+  if (typeof row.id !== "string" || !row.id.trim()) throw new Error("\u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440 \u0431\u0435\u0437 id");
+  if (typeof row.name !== "string") throw new Error("\u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440 \u0431\u0435\u0437 \u0438\u043C\u0435\u043D\u0438");
+  if (typeof row.base !== "string") throw new Error("\u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440 \u0431\u0435\u0437 \u0430\u0434\u0440\u0435\u0441\u0430");
+  if (typeof row.key !== "string") throw new Error("\u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440 \u0431\u0435\u0437 \u043A\u043B\u044E\u0447\u0430");
+  if (typeof row.model !== "string") throw new Error("\u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440 \u0431\u0435\u0437 \u043C\u043E\u0434\u0435\u043B\u0438");
+  return {
+    id: row.id.trim(),
+    name: row.name.trim(),
+    base: row.base.trim(),
+    key: row.key,
+    model: row.model.trim()
+  };
+}
+
 // src/replace.ts
 function replaceOnce(text, oldStr, newStr) {
   if (oldStr === "") throw new Error("\u043F\u0443\u0441\u0442\u043E\u0439 \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442 \u0434\u043B\u044F \u0437\u0430\u043C\u0435\u043D\u044B");
@@ -262,16 +327,10 @@ async function dispatchTool(fs, name, args) {
 
 // src/main.ts
 var VIEW = "obsidian-agent";
-var DEFAULT_SETTINGS = {
-  base: "https://api.openai.com/v1",
-  key: "",
-  model: "gpt-4o",
-  maxSteps: 8
-};
 var AgentPlugin = class extends import_obsidian.Plugin {
   constructor() {
     super(...arguments);
-    this.settings = DEFAULT_SETTINGS;
+    this.settings = freshSettings();
     this.lines = [];
     this.history = [];
     this.running = false;
@@ -287,12 +346,12 @@ var AgentPlugin = class extends import_obsidian.Plugin {
   }
   async loadSettings() {
     const saved = await this.loadData();
-    if (!saved || typeof saved !== "object") return;
-    const data = saved;
-    if (typeof data.base === "string" && data.base.trim()) this.settings.base = data.base.trim();
-    if (typeof data.key === "string") this.settings.key = data.key;
-    if (typeof data.model === "string" && data.model.trim()) this.settings.model = data.model.trim();
-    if (typeof data.maxSteps === "number" && Number.isInteger(data.maxSteps) && data.maxSteps >= 1) this.settings.maxSteps = data.maxSteps;
+    this.settings = settingsFromSaved(saved);
+    if (saved && typeof saved === "object" && !("providers" in saved)) await this.saveSettings();
+  }
+  activeProvider() {
+    var _a;
+    return (_a = this.settings.providers.find((item) => item.id === this.settings.activeId)) != null ? _a : null;
   }
   async saveSettings() {
     await this.saveData(this.settings);
@@ -327,9 +386,14 @@ var AgentPlugin = class extends import_obsidian.Plugin {
   }
   async ask(task) {
     if (this.running) return;
-    const key = this.settings.key.trim();
-    const model = this.settings.model.trim();
-    const base = this.settings.base.trim().replace(/\/$/, "");
+    const provider = this.activeProvider();
+    if (!provider) {
+      this.push({ kind: "error", text: "\u0432\u044B\u0431\u0435\u0440\u0438 \u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440\u0430 \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0430\u0445 \u043F\u043B\u0430\u0433\u0438\u043D\u0430" });
+      return;
+    }
+    const key = provider.key.trim();
+    const model = provider.model.trim();
+    const base = provider.base.trim().replace(/\/$/, "");
     if (!key) {
       this.push({ kind: "error", text: "\u0443\u043A\u0430\u0436\u0438 \u043A\u043B\u044E\u0447 \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0430\u0445 \u043F\u043B\u0430\u0433\u0438\u043D\u0430" });
       return;
@@ -453,6 +517,8 @@ var AgentView = class extends import_obsidian.ItemView {
     this.logEl = null;
     this.inputEl = null;
     this.sendEl = null;
+    this.providerEl = null;
+    this.providerSignature = "";
     this.plugin = plugin;
   }
   getViewType() {
@@ -469,6 +535,12 @@ var AgentView = class extends import_obsidian.ItemView {
     const root = this.contentEl;
     root.empty();
     root.addClass("agent-root");
+    this.providerEl = root.createEl("select", { cls: "agent-provider" });
+    this.providerEl.addEventListener("change", () => {
+      if (!this.providerEl) return;
+      this.plugin.settings.activeId = this.providerEl.value;
+      void this.plugin.saveSettings();
+    });
     this.logEl = root.createDiv({ cls: "agent-log" });
     this.inputEl = root.createEl("textarea", { attr: { rows: "4", placeholder: "\u0427\u0442\u043E \u0441\u0434\u0435\u043B\u0430\u0442\u044C \u0441 \u0437\u0430\u043C\u0435\u0442\u043A\u043E\u0439" } });
     const row = root.createDiv({ cls: "agent-row" });
@@ -483,6 +555,7 @@ var AgentView = class extends import_obsidian.ItemView {
   }
   paint() {
     if (!this.logEl || !this.sendEl) return;
+    this.syncProviderSelect();
     this.logEl.empty();
     for (const line of this.plugin.lines) {
       this.logEl.createDiv({ cls: "agent-line agent-" + line.kind, text: line.text });
@@ -501,6 +574,21 @@ var AgentView = class extends import_obsidian.ItemView {
     if (this.inputEl) this.inputEl.value = "";
     void this.plugin.ask(text);
   }
+  syncProviderSelect() {
+    const select = this.providerEl;
+    if (!select) return;
+    const providers = this.plugin.settings.providers;
+    const signature = providers.map((item) => item.id + "\0" + item.name).join("\n");
+    if (this.providerSignature !== signature) {
+      while (select.options.length > 0) select.remove(0);
+      const known = providers.some((item) => item.id === this.plugin.settings.activeId);
+      if (!known) select.add(new Option(providers.length === 0 ? "\u043D\u0435\u0442 \u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440\u0430" : "\u0432\u044B\u0431\u0435\u0440\u0438 \u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440\u0430", ""));
+      for (const item of providers) select.add(new Option(item.name || item.id, item.id));
+      this.providerSignature = signature;
+    }
+    const wanted = providers.some((item) => item.id === this.plugin.settings.activeId) ? this.plugin.settings.activeId : "";
+    if (select.value !== wanted) select.value = wanted;
+  }
 };
 var AgentSettingTab = class extends import_obsidian.PluginSettingTab {
   constructor(app, plugin) {
@@ -510,34 +598,24 @@ var AgentSettingTab = class extends import_obsidian.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    new import_obsidian.Setting(containerEl).setName("\u0410\u0434\u0440\u0435\u0441 API").setDesc("OpenAI-\u0441\u043E\u0432\u043C\u0435\u0441\u0442\u0438\u043C\u044B\u0439 \u0430\u0434\u0440\u0435\u0441, \u0431\u0435\u0437 /chat/completions").addText((text) => text.setPlaceholder(DEFAULT_SETTINGS.base).setValue(this.plugin.settings.base).onChange(async (value) => {
-      this.plugin.settings.base = value.trim();
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian.Setting(containerEl).setName("\u041A\u043B\u044E\u0447").addText((text) => {
-      text.inputEl.type = "password";
-      text.setValue(this.plugin.settings.key).onChange(async (value) => {
-        this.plugin.settings.key = value;
+    const providers = this.plugin.settings.providers;
+    const active = this.plugin.activeProvider();
+    new import_obsidian.Setting(containerEl).setName("\u041F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440").addDropdown((menu) => {
+      var _a;
+      if (!active) menu.addOption("", providers.length ? "\u0432\u044B\u0431\u0435\u0440\u0438 \u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440\u0430" : "\u043D\u0435\u0442 \u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440\u0430");
+      for (const item of providers) menu.addOption(item.id, item.name || item.id);
+      menu.setValue((_a = active == null ? void 0 : active.id) != null ? _a : "").onChange(async (value) => {
+        this.plugin.settings.activeId = value;
         await this.plugin.saveSettings();
+        this.plugin.paint();
+        this.display();
       });
-    });
-    const modelSetting = new import_obsidian.Setting(containerEl).setName("\u041C\u043E\u0434\u0435\u043B\u044C").setDesc("\u0437\u0430\u0433\u0440\u0443\u0436\u0430\u044E \u0441\u043F\u0438\u0441\u043E\u043A\u2026");
-    let dropdown = null;
-    modelSetting.addDropdown((menu) => {
-      dropdown = menu;
-      const current = this.plugin.settings.model.trim();
-      if (current) menu.addOption(current, current);
-      menu.setValue(current).onChange(async (value) => {
-        if (!value.trim()) return;
-        this.plugin.settings.model = value.trim();
-        await this.plugin.saveSettings();
-      });
-    });
-    modelSetting.addButton((button) => button.setButtonText("\u043E\u0431\u043D\u043E\u0432\u0438\u0442\u044C").onClick(() => {
-      if (!dropdown) return;
-      void this.fillModels(modelSetting, dropdown);
-    }));
-    if (dropdown) void this.fillModels(modelSetting, dropdown);
+    }).addButton((button) => button.setButtonText("\u0434\u043E\u0431\u0430\u0432\u0438\u0442\u044C").onClick(() => this.addProvider())).addButton((button) => button.setButtonText("\u0443\u0431\u0440\u0430\u0442\u044C").onClick(() => this.removeProvider()));
+    if (!active) {
+      new import_obsidian.Setting(containerEl).setDesc(providers.length ? "\u0432\u044B\u0431\u0435\u0440\u0438 \u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440\u0430" : "\u0434\u043E\u0431\u0430\u0432\u044C \u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440\u0430");
+    } else {
+      this.providerFields(containerEl, active);
+    }
     new import_obsidian.Setting(containerEl).setName("\u0428\u0430\u0433\u043E\u0432 \u0437\u0430 \u043E\u0442\u0432\u0435\u0442").addText((text) => text.setValue(String(this.plugin.settings.maxSteps)).onChange(async (value) => {
       const steps = Number(value);
       if (!Number.isInteger(steps) || steps < 1 || steps > 30) {
@@ -548,9 +626,70 @@ var AgentSettingTab = class extends import_obsidian.PluginSettingTab {
       await this.plugin.saveSettings();
     }));
   }
-  async fillModels(setting, dropdown) {
-    const base = this.plugin.settings.base.trim().replace(/\/$/, "");
-    const key = this.plugin.settings.key.trim();
+  providerFields(containerEl, provider) {
+    new import_obsidian.Setting(containerEl).setName("\u0418\u043C\u044F").addText((text) => text.setValue(provider.name).onChange(async (value) => {
+      provider.name = value.trim();
+      await this.plugin.saveSettings();
+      this.plugin.paint();
+    }));
+    new import_obsidian.Setting(containerEl).setName("\u0410\u0434\u0440\u0435\u0441 API").setDesc("OpenAI-\u0441\u043E\u0432\u043C\u0435\u0441\u0442\u0438\u043C\u044B\u0439 \u0430\u0434\u0440\u0435\u0441, \u0431\u0435\u0437 /chat/completions").addText((text) => text.setPlaceholder("https://api.openai.com/v1").setValue(provider.base).onChange(async (value) => {
+      provider.base = value.trim();
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian.Setting(containerEl).setName("\u041A\u043B\u044E\u0447").addText((text) => {
+      text.inputEl.type = "password";
+      text.setValue(provider.key).onChange(async (value) => {
+        provider.key = value;
+        await this.plugin.saveSettings();
+      });
+    });
+    const modelSetting = new import_obsidian.Setting(containerEl).setName("\u041C\u043E\u0434\u0435\u043B\u044C").setDesc("\u0437\u0430\u0433\u0440\u0443\u0436\u0430\u044E \u0441\u043F\u0438\u0441\u043E\u043A\u2026");
+    let dropdown = null;
+    modelSetting.addDropdown((menu) => {
+      dropdown = menu;
+      const current = provider.model.trim();
+      if (current) menu.addOption(current, current);
+      menu.setValue(current).onChange(async (value) => {
+        if (!value.trim()) return;
+        provider.model = value.trim();
+        await this.plugin.saveSettings();
+      });
+    });
+    modelSetting.addButton((button) => button.setButtonText("\u043E\u0431\u043D\u043E\u0432\u0438\u0442\u044C").onClick(() => {
+      if (!dropdown) return;
+      void this.fillModels(modelSetting, dropdown, provider);
+    }));
+    if (dropdown) void this.fillModels(modelSetting, dropdown, provider);
+  }
+  async addProvider() {
+    const provider = {
+      id: newProviderId(),
+      name: "\u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440 " + (this.plugin.settings.providers.length + 1),
+      base: "",
+      key: "",
+      model: ""
+    };
+    this.plugin.settings.providers.push(provider);
+    this.plugin.settings.activeId = provider.id;
+    await this.plugin.saveSettings();
+    this.plugin.paint();
+    this.display();
+  }
+  async removeProvider() {
+    const current = this.plugin.activeProvider();
+    if (!current) {
+      new import_obsidian.Notice("\u0432\u044B\u0431\u0435\u0440\u0438 \u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440\u0430");
+      return;
+    }
+    this.plugin.settings.providers = this.plugin.settings.providers.filter((item) => item.id !== current.id);
+    this.plugin.settings.activeId = "";
+    await this.plugin.saveSettings();
+    this.plugin.paint();
+    this.display();
+  }
+  async fillModels(setting, dropdown, provider) {
+    const base = provider.base.trim().replace(/\/$/, "");
+    const key = provider.key.trim();
     if (!base || !key) {
       setting.setDesc("\u0443\u043A\u0430\u0436\u0438 \u0430\u0434\u0440\u0435\u0441 API \u0438 \u043A\u043B\u044E\u0447, \u0437\u0430\u0442\u0435\u043C \u043D\u0430\u0436\u043C\u0438 \xAB\u043E\u0431\u043D\u043E\u0432\u0438\u0442\u044C\xBB");
       return;
@@ -562,12 +701,14 @@ var AgentSettingTab = class extends import_obsidian.PluginSettingTab {
         headers: { Authorization: "Bearer " + key },
         throw: false
       });
+      if (this.plugin.settings.activeId !== provider.id) return;
       if (res.status < 200 || res.status >= 300) {
         const body = (res.text || "").slice(0, 500);
         throw new Error("\u0441\u043F\u0438\u0441\u043E\u043A \u043C\u043E\u0434\u0435\u043B\u0435\u0439 \u043E\u0442\u0432\u0435\u0442\u0438\u043B " + res.status + (body ? ": " + body : ""));
       }
       const ids = modelIds(res.json);
-      const current = this.plugin.settings.model.trim();
+      if (this.plugin.settings.activeId !== provider.id) return;
+      const current = provider.model.trim();
       dropdown.selectEl.length = 0;
       if (!current) dropdown.addOption("", "\u0432\u044B\u0431\u0435\u0440\u0438 \u043C\u043E\u0434\u0435\u043B\u044C");
       else if (!ids.includes(current)) dropdown.addOption(current, current);
@@ -576,6 +717,7 @@ var AgentSettingTab = class extends import_obsidian.PluginSettingTab {
       const missing = current && !ids.includes(current) ? " \u0422\u0435\u043A\u0443\u0449\u0435\u0439 \u043C\u043E\u0434\u0435\u043B\u0438 \u043D\u0435\u0442 \u0432 \u0441\u043F\u0438\u0441\u043A\u0435 \u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440\u0430." : "";
       setting.setDesc(ids.length + " \u043C\u043E\u0434\u0435\u043B\u0435\u0439. \u041D\u0443\u0436\u043D\u044B \u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442\u044B \u0438 \u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0438." + missing);
     } catch (err) {
+      if (this.plugin.settings.activeId !== provider.id) return;
       const message = err instanceof Error ? err.message : String(err);
       setting.setDesc(message);
       new import_obsidian.Notice(message);

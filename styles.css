@@ -36,6 +36,10 @@
   color: var(--text-error);
 }
 
+.agent-provider {
+  width: 100%;
+}
+
 .agent-root textarea {
   width: 100%;
   box-sizing: border-box;
