@@ -1,5 +1,6 @@
-import { ItemView, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf, requestUrl, type App } from "obsidian";
+import { ItemView, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf, requestUrl, type App, type DropdownComponent } from "obsidian";
 import { TOOLS, runAgent, systemPrompt, type ChatMessage } from "./agent.ts";
+import { modelIds } from "./models.ts";
 import { dispatchTool, type VaultFs } from "./vault.ts";
 
 const VIEW = "obsidian-agent";
@@ -294,13 +295,23 @@ class AgentSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         });
       });
-    new Setting(containerEl)
-      .setName("Модель")
-      .setDesc("Нужны инструменты и картинки, например gpt-4o")
-      .addText((text) => text.setValue(this.plugin.settings.model).onChange(async (value) => {
+    const modelSetting = new Setting(containerEl).setName("Модель").setDesc("загружаю список…");
+    let dropdown: DropdownComponent | null = null;
+    modelSetting.addDropdown((menu) => {
+      dropdown = menu;
+      const current = this.plugin.settings.model.trim();
+      if (current) menu.addOption(current, current);
+      menu.setValue(current).onChange(async (value) => {
+        if (!value.trim()) return;
         this.plugin.settings.model = value.trim();
         await this.plugin.saveSettings();
-      }));
+      });
+    });
+    modelSetting.addButton((button) => button.setButtonText("обновить").onClick(() => {
+      if (!dropdown) return;
+      void this.fillModels(modelSetting, dropdown);
+    }));
+    if (dropdown) void this.fillModels(modelSetting, dropdown);
     new Setting(containerEl)
       .setName("Шагов за ответ")
       .addText((text) => text.setValue(String(this.plugin.settings.maxSteps)).onChange(async (value) => {
@@ -312,5 +323,39 @@ class AgentSettingTab extends PluginSettingTab {
         this.plugin.settings.maxSteps = steps;
         await this.plugin.saveSettings();
       }));
+  }
+
+  private async fillModels(setting: Setting, dropdown: DropdownComponent) {
+    const base = this.plugin.settings.base.trim().replace(/\/$/, "");
+    const key = this.plugin.settings.key.trim();
+    if (!base || !key) {
+      setting.setDesc("укажи адрес API и ключ, затем нажми «обновить»");
+      return;
+    }
+    try {
+      const res = await requestUrl({
+        url: base + "/models",
+        method: "GET",
+        headers: { Authorization: "Bearer " + key },
+        throw: false,
+      });
+      if (res.status < 200 || res.status >= 300) {
+        const body = (res.text || "").slice(0, 500);
+        throw new Error("список моделей ответил " + res.status + (body ? ": " + body : ""));
+      }
+      const ids = modelIds(res.json);
+      const current = this.plugin.settings.model.trim();
+      dropdown.selectEl.length = 0;
+      if (!current) dropdown.addOption("", "выбери модель");
+      else if (!ids.includes(current)) dropdown.addOption(current, current);
+      for (const id of ids) dropdown.addOption(id, id);
+      dropdown.setValue(current);
+      const missing = current && !ids.includes(current) ? " Текущей модели нет в списке провайдера." : "";
+      setting.setDesc(ids.length + " моделей. Нужны инструменты и картинки." + missing);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setting.setDesc(message);
+      new Notice(message);
+    }
   }
 }

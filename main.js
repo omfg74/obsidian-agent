@@ -150,6 +150,23 @@ async function runAgent(input) {
   throw new Error("\u043B\u0438\u043C\u0438\u0442 \u0448\u0430\u0433\u043E\u0432: " + input.maxSteps);
 }
 
+// src/models.ts
+function modelIds(body) {
+  if (!body || typeof body !== "object" || !("data" in body)) throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043F\u0438\u0441\u043A\u0430 \u043C\u043E\u0434\u0435\u043B\u0435\u0439");
+  const data = body.data;
+  if (!Array.isArray(data)) throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043F\u0438\u0441\u043A\u0430 \u043C\u043E\u0434\u0435\u043B\u0435\u0439");
+  if (data.length === 0) throw new Error("\u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440 \u043D\u0435 \u0432\u0435\u0440\u043D\u0443\u043B \u043D\u0438 \u043E\u0434\u043D\u043E\u0439 \u043C\u043E\u0434\u0435\u043B\u0438");
+  const ids = [];
+  for (const item of data) {
+    if (!item || typeof item !== "object" || typeof item.id !== "string") throw new Error("\u0432 \u0441\u043F\u0438\u0441\u043A\u0435 \u043C\u043E\u0434\u0435\u043B\u0435\u0439 \u0435\u0441\u0442\u044C \u0437\u0430\u043F\u0438\u0441\u044C \u0431\u0435\u0437 id");
+    const id = item.id.trim();
+    if (!id) throw new Error("\u0432 \u0441\u043F\u0438\u0441\u043A\u0435 \u043C\u043E\u0434\u0435\u043B\u0435\u0439 \u0435\u0441\u0442\u044C \u0437\u0430\u043F\u0438\u0441\u044C \u0431\u0435\u0437 id");
+    if (!ids.includes(id)) ids.push(id);
+  }
+  ids.sort((a, b) => a.localeCompare(b));
+  return ids;
+}
+
 // src/replace.ts
 function replaceOnce(text, oldStr, newStr) {
   if (oldStr === "") throw new Error("\u043F\u0443\u0441\u0442\u043E\u0439 \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442 \u0434\u043B\u044F \u0437\u0430\u043C\u0435\u043D\u044B");
@@ -504,10 +521,23 @@ var AgentSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       });
     });
-    new import_obsidian.Setting(containerEl).setName("\u041C\u043E\u0434\u0435\u043B\u044C").setDesc("\u041D\u0443\u0436\u043D\u044B \u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442\u044B \u0438 \u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0438, \u043D\u0430\u043F\u0440\u0438\u043C\u0435\u0440 gpt-4o").addText((text) => text.setValue(this.plugin.settings.model).onChange(async (value) => {
-      this.plugin.settings.model = value.trim();
-      await this.plugin.saveSettings();
+    const modelSetting = new import_obsidian.Setting(containerEl).setName("\u041C\u043E\u0434\u0435\u043B\u044C").setDesc("\u0437\u0430\u0433\u0440\u0443\u0436\u0430\u044E \u0441\u043F\u0438\u0441\u043E\u043A\u2026");
+    let dropdown = null;
+    modelSetting.addDropdown((menu) => {
+      dropdown = menu;
+      const current = this.plugin.settings.model.trim();
+      if (current) menu.addOption(current, current);
+      menu.setValue(current).onChange(async (value) => {
+        if (!value.trim()) return;
+        this.plugin.settings.model = value.trim();
+        await this.plugin.saveSettings();
+      });
+    });
+    modelSetting.addButton((button) => button.setButtonText("\u043E\u0431\u043D\u043E\u0432\u0438\u0442\u044C").onClick(() => {
+      if (!dropdown) return;
+      void this.fillModels(modelSetting, dropdown);
     }));
+    if (dropdown) void this.fillModels(modelSetting, dropdown);
     new import_obsidian.Setting(containerEl).setName("\u0428\u0430\u0433\u043E\u0432 \u0437\u0430 \u043E\u0442\u0432\u0435\u0442").addText((text) => text.setValue(String(this.plugin.settings.maxSteps)).onChange(async (value) => {
       const steps = Number(value);
       if (!Number.isInteger(steps) || steps < 1 || steps > 30) {
@@ -517,5 +547,38 @@ var AgentSettingTab = class extends import_obsidian.PluginSettingTab {
       this.plugin.settings.maxSteps = steps;
       await this.plugin.saveSettings();
     }));
+  }
+  async fillModels(setting, dropdown) {
+    const base = this.plugin.settings.base.trim().replace(/\/$/, "");
+    const key = this.plugin.settings.key.trim();
+    if (!base || !key) {
+      setting.setDesc("\u0443\u043A\u0430\u0436\u0438 \u0430\u0434\u0440\u0435\u0441 API \u0438 \u043A\u043B\u044E\u0447, \u0437\u0430\u0442\u0435\u043C \u043D\u0430\u0436\u043C\u0438 \xAB\u043E\u0431\u043D\u043E\u0432\u0438\u0442\u044C\xBB");
+      return;
+    }
+    try {
+      const res = await (0, import_obsidian.requestUrl)({
+        url: base + "/models",
+        method: "GET",
+        headers: { Authorization: "Bearer " + key },
+        throw: false
+      });
+      if (res.status < 200 || res.status >= 300) {
+        const body = (res.text || "").slice(0, 500);
+        throw new Error("\u0441\u043F\u0438\u0441\u043E\u043A \u043C\u043E\u0434\u0435\u043B\u0435\u0439 \u043E\u0442\u0432\u0435\u0442\u0438\u043B " + res.status + (body ? ": " + body : ""));
+      }
+      const ids = modelIds(res.json);
+      const current = this.plugin.settings.model.trim();
+      dropdown.selectEl.length = 0;
+      if (!current) dropdown.addOption("", "\u0432\u044B\u0431\u0435\u0440\u0438 \u043C\u043E\u0434\u0435\u043B\u044C");
+      else if (!ids.includes(current)) dropdown.addOption(current, current);
+      for (const id of ids) dropdown.addOption(id, id);
+      dropdown.setValue(current);
+      const missing = current && !ids.includes(current) ? " \u0422\u0435\u043A\u0443\u0449\u0435\u0439 \u043C\u043E\u0434\u0435\u043B\u0438 \u043D\u0435\u0442 \u0432 \u0441\u043F\u0438\u0441\u043A\u0435 \u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440\u0430." : "";
+      setting.setDesc(ids.length + " \u043C\u043E\u0434\u0435\u043B\u0435\u0439. \u041D\u0443\u0436\u043D\u044B \u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442\u044B \u0438 \u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0438." + missing);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setting.setDesc(message);
+      new import_obsidian.Notice(message);
+    }
   }
 };
