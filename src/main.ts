@@ -1,17 +1,16 @@
 import { ItemView, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf, requestUrl, type App, type DropdownComponent } from "obsidian";
 import { TOOLS, runAgent, systemPrompt, type ChatMessage } from "./agent.ts";
+import { newSession, sessionTitle, sessionsFromSaved, stripImages, type ChatLine, type Session } from "./chats.ts";
 import { modelIds } from "./models.ts";
 import { freshSettings, newProviderId, settingsFromSaved, type AgentSettings, type Provider } from "./settings.ts";
 import { dispatchTool, type VaultFs } from "./vault.ts";
 
 const VIEW = "obsidian-agent";
 
-type Line = { kind: "user" | "assistant" | "tool" | "error"; text: string };
-
 export default class AgentPlugin extends Plugin {
   settings: AgentSettings = freshSettings();
-  lines: Line[] = [];
-  history: ChatMessage[] = [];
+  sessions: Session[] = [];
+  sessionId = "";
   running = false;
   stop = false;
   view: AgentView | null = null;
@@ -21,13 +20,74 @@ export default class AgentPlugin extends Plugin {
     this.registerView(VIEW, (leaf) => new AgentView(leaf, this));
     this.addRibbonIcon("bot", "Агент", () => this.activate());
     this.addCommand({ id: "open", name: "Открыть", callback: () => this.activate() });
+    this.addCommand({ id: "new-chat", name: "Новый чат", callback: () => void this.newChat() });
     this.addSettingTab(new AgentSettingTab(this.app, this));
   }
 
   async loadSettings() {
     const saved = await this.loadData();
     this.settings = settingsFromSaved(saved);
-    if (saved && typeof saved === "object" && !("providers" in saved)) await this.saveSettings();
+    const chats = sessionsFromSaved(saved);
+    if (!chats) {
+      const session = newSession();
+      this.sessions = [session];
+      this.sessionId = session.id;
+    } else {
+      this.sessions = chats.sessions;
+      this.sessionId = chats.sessionId;
+    }
+    const migrate = !saved || typeof saved !== "object" || !("providers" in saved) || !("sessions" in saved);
+    if (saved && typeof saved === "object" && migrate) await this.saveSettings();
+  }
+
+  activeSession(): Session | null {
+    return this.sessions.find((item) => item.id === this.sessionId) ?? null;
+  }
+
+  async newChat() {
+    if (this.running) {
+      new Notice("сначала останови текущий запрос");
+      return;
+    }
+    const current = this.activeSession();
+    if (current && current.lines.length === 0 && current.history.length === 0) return;
+    const session = newSession();
+    this.sessions.unshift(session);
+    this.sessionId = session.id;
+    await this.saveSettings();
+    this.paint();
+  }
+
+  async openSession(id: string) {
+    if (this.running) {
+      new Notice("сначала останови текущий запрос");
+      this.paint();
+      return;
+    }
+    if (!this.sessions.some((item) => item.id === id)) {
+      new Notice("нет чата");
+      this.paint();
+      return;
+    }
+    this.sessionId = id;
+    await this.saveSettings();
+    this.paint();
+  }
+
+  async deleteSession() {
+    if (this.running) {
+      new Notice("сначала останови текущий запрос");
+      return;
+    }
+    const current = this.activeSession();
+    if (!current) {
+      new Notice("нет чата");
+      return;
+    }
+    this.sessions = this.sessions.filter((item) => item.id !== current.id);
+    this.sessionId = "";
+    await this.saveSettings();
+    this.paint();
   }
 
   activeProvider(): Provider | null {
@@ -52,7 +112,11 @@ export default class AgentPlugin extends Plugin {
   }
 
   async saveSettings() {
-    await this.saveData(this.settings);
+    const sessions = this.sessions.map((session) => {
+      const stored = stripImages(session.history);
+      return { ...session, history: stored.history, imagesOmitted: session.imagesOmitted || stored.imagesOmitted };
+    });
+    await this.saveData({ ...this.settings, sessions, sessionId: this.sessionId });
   }
 
   async activate() {
@@ -70,23 +134,21 @@ export default class AgentPlugin extends Plugin {
     this.view?.paint();
   }
 
-  clear() {
-    if (this.running) {
-      this.push({ kind: "error", text: "сначала останови текущий запрос" });
-      return;
-    }
-    this.lines = [];
-    this.history = [];
-    this.paint();
-  }
-
-  push(line: Line) {
-    this.lines.push(line);
+  push(line: ChatLine) {
+    const session = this.activeSession();
+    if (!session) throw new Error("нет чата");
+    session.lines.push(line);
+    if (line.kind === "user") session.title = sessionTitle(session.lines);
     this.paint();
   }
 
   async ask(task: string) {
     if (this.running) return;
+    const session = this.activeSession();
+    if (!session) {
+      new Notice("нет чата");
+      return;
+    }
     const provider = this.activeProvider();
     if (!provider) {
       this.push({ kind: "error", text: "выбери провайдера в настройках плагина" });
@@ -106,12 +168,12 @@ export default class AgentPlugin extends Plugin {
     const active = this.activePath();
     const selected = this.selection();
     const prompt = [selected ? "Выделение:\n" + selected : "", "Задание:\n" + task].filter(Boolean).join("\n\n");
-    this.history.push({ role: "user", content: prompt });
+    session.history.push({ role: "user", content: prompt });
     this.push({ kind: "user", text: task });
     this.running = true;
     this.stop = false;
     this.paint();
-    const messages: ChatMessage[] = [{ role: "system", content: systemPrompt(active) }, ...this.history.filter((item) => item.role !== "system")];
+    const messages: ChatMessage[] = [{ role: "system", content: systemPrompt(active) }, ...session.history.filter((item) => item.role !== "system")];
     try {
       await runAgent({
         messages,
@@ -129,10 +191,11 @@ export default class AgentPlugin extends Plugin {
       const message = err instanceof Error ? err.message : String(err);
       this.push({ kind: "error", text: message });
     } finally {
-      this.history = messages.filter((item) => item.role !== "system");
+      session.history = messages.filter((item) => item.role !== "system");
       this.running = false;
       this.stop = false;
       this.paint();
+      await this.saveSettings();
     }
   }
 
@@ -224,6 +287,9 @@ class AgentView extends ItemView {
   modelSignature = "";
   modelState: { providerId: string; ids: string[] } | { providerId: string; error: string } | null = null;
   modelLoading = "";
+  chatEl: HTMLSelectElement | null = null;
+  chatSignature = "";
+  noteEl: HTMLElement | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: AgentPlugin) {
     super(leaf);
@@ -264,13 +330,21 @@ class AgentView extends ItemView {
       provider.model = value;
       void this.plugin.saveSettings();
     });
+    const chatRow = root.createDiv({ cls: "agent-chat-row" });
+    this.chatEl = chatRow.createEl("select");
+    this.chatEl.addEventListener("change", () => {
+      const value = this.chatEl?.value ?? "";
+      if (!value) return;
+      void this.plugin.openSession(value);
+    });
+    chatRow.createEl("button", { text: "новый чат" }).addEventListener("click", () => void this.plugin.newChat());
+    chatRow.createEl("button", { text: "убрать" }).addEventListener("click", () => void this.plugin.deleteSession());
+    this.noteEl = root.createDiv({ cls: "agent-tool" });
     this.logEl = root.createDiv({ cls: "agent-log" });
     this.inputEl = root.createEl("textarea", { attr: { rows: "4", placeholder: "Что сделать с заметкой" } });
     const row = root.createDiv({ cls: "agent-row" });
     this.sendEl = row.createEl("button", { text: "отправить" });
     this.sendEl.addEventListener("click", () => this.onSend());
-    const clear = row.createEl("button", { text: "очистить" });
-    clear.addEventListener("click", () => this.plugin.clear());
     this.paint();
   }
 
@@ -282,12 +356,20 @@ class AgentView extends ItemView {
     if (!this.logEl || !this.sendEl) return;
     this.syncProviderSelect();
     this.syncModelSelect();
+    this.syncChatSelect();
     const provider = this.plugin.activeProvider();
     const listed = this.modelState?.providerId === provider?.id;
     if (provider?.base.trim() && provider.key.trim() && !listed && this.modelLoading !== provider.id) void this.loadChatModels();
+    const session = this.plugin.activeSession();
+    if (this.noteEl) {
+      this.noteEl.hidden = !session?.imagesOmitted;
+      this.noteEl.setText(session?.imagesOmitted ? "картинки этого чата не сохранены, модель их не видит" : "");
+    }
     this.logEl.empty();
-    for (const line of this.plugin.lines) {
-      this.logEl.createDiv({ cls: "agent-line agent-" + line.kind, text: line.text });
+    if (session) {
+      for (const line of session.lines) {
+        this.logEl.createDiv({ cls: "agent-line agent-" + line.kind, text: line.text });
+      }
     }
     this.logEl.scrollTop = this.logEl.scrollHeight;
     this.sendEl.setText(this.plugin.running ? "стоп" : "отправить");
@@ -317,6 +399,22 @@ class AgentView extends ItemView {
       this.providerSignature = signature;
     }
     const wanted = providers.some((item) => item.id === this.plugin.settings.activeId) ? this.plugin.settings.activeId : "";
+    if (select.value !== wanted) select.value = wanted;
+  }
+
+  private syncChatSelect() {
+    const select = this.chatEl;
+    if (!select) return;
+    const sessions = this.plugin.sessions;
+    const signature = sessions.map((item) => item.id + "\0" + item.title).join("\n");
+    if (this.chatSignature !== signature) {
+      while (select.options.length > 0) select.remove(0);
+      const known = sessions.some((item) => item.id === this.plugin.sessionId);
+      if (!known) select.add(new Option(sessions.length === 0 ? "нет чата" : "выбери чат", ""));
+      for (const item of sessions) select.add(new Option(item.title || item.id, item.id));
+      this.chatSignature = signature;
+    }
+    const wanted = sessions.some((item) => item.id === this.plugin.sessionId) ? this.plugin.sessionId : "";
     if (select.value !== wanted) select.value = wanted;
   }
 
