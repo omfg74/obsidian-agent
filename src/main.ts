@@ -1,4 +1,4 @@
-import { ItemView, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf, requestUrl, setIcon, type App, type DropdownComponent } from "obsidian";
+import { ItemView, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf, requestUrl, setIcon, setTooltip, type App, type DropdownComponent } from "obsidian";
 import { TOOLS, runAgent, systemPrompt, type ChatMessage } from "./agent.ts";
 import { newSession, sessionTitle, sessionsFromSaved, stripImages, type ChatLine, type Session } from "./chats.ts";
 import { modelIds } from "./models.ts";
@@ -121,7 +121,10 @@ export default class AgentPlugin extends Plugin {
       return;
     }
     const current = this.activeSession();
-    if (current && current.lines.length === 0 && current.history.length === 0) return;
+    if (current && current.lines.length === 0 && current.history.length === 0) {
+      new Notice("этот чат уже пустой");
+      return;
+    }
     const session = newSession();
     this.sessions.unshift(session);
     this.sessionId = session.id;
@@ -341,10 +344,26 @@ export default class AgentPlugin extends Plugin {
   }
 }
 
-function iconButton(parent: HTMLElement, icon: string, label: string): HTMLButtonElement {
-  const button = parent.createEl("button", { cls: "agent-icon", attr: { "aria-label": label, title: label } });
+function iconButton(parent: HTMLElement, icon: string, label: string): HTMLElement {
+  const button = parent.createDiv({
+    cls: "clickable-icon agent-icon",
+    attr: { role: "button", tabindex: "0", "aria-label": label },
+  });
   setIcon(button, icon);
+  setTooltip(button, label);
+  button.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    button.click();
+  });
   return button;
+}
+
+function picker(parent: HTMLElement): HTMLSelectElement {
+  const wrap = parent.createDiv({ cls: "agent-picker" });
+  const select = wrap.createEl("select");
+  wrap.createDiv({ cls: "agent-picker-mark", attr: { "aria-hidden": "true" } });
+  return select;
 }
 
 async function copyLine(text: string) {
@@ -367,7 +386,7 @@ class AgentView extends ItemView {
   plugin: AgentPlugin;
   logEl: HTMLElement | null = null;
   inputEl: HTMLTextAreaElement | null = null;
-  sendEl: HTMLButtonElement | null = null;
+  sendEl: HTMLElement | null = null;
   providerEl: HTMLSelectElement | null = null;
   providerSignature = "";
   modelEl: HTMLSelectElement | null = null;
@@ -405,7 +424,7 @@ class AgentView extends ItemView {
     this.noteEl = root.createDiv({ cls: "agent-note" });
     this.logEl = root.createDiv({ cls: "agent-log" });
     const chatRow = root.createDiv({ cls: "agent-chatbar" });
-    this.chatEl = chatRow.createEl("select");
+    this.chatEl = picker(chatRow);
     this.chatEl.addEventListener("change", () => {
       const value = this.chatEl?.value ?? "";
       if (!value) return;
@@ -422,7 +441,7 @@ class AgentView extends ItemView {
     this.inputEl = composer.createEl("textarea", { attr: { rows: "3", placeholder: "Задание для заметки в фокусе" } });
     const bar = composer.createDiv({ cls: "agent-composer-bar" });
     iconButton(bar, "at-sign", "текущий файл").addEventListener("click", () => void this.plugin.focusOpenNote());
-    this.modelEl = bar.createEl("select", { cls: "agent-model" });
+    this.modelEl = picker(bar);
     this.modelEl.addEventListener("change", () => {
       const provider = this.plugin.activeProvider();
       const value = this.modelEl?.value.trim() ?? "";
@@ -430,7 +449,7 @@ class AgentView extends ItemView {
       provider.model = value;
       void this.plugin.saveSettings();
     });
-    this.providerEl = bar.createEl("select", { cls: "agent-model" });
+    this.providerEl = picker(bar);
     this.providerEl.addEventListener("change", () => {
       if (!this.providerEl) return;
       this.plugin.settings.activeId = this.providerEl.value;
@@ -484,9 +503,10 @@ class AgentView extends ItemView {
     if (this.plugin.running) this.logEl.createDiv({ cls: "agent-spin", attr: { "aria-label": "агент работает" } });
     this.logEl.scrollTop = this.logEl.scrollHeight;
     const sending = this.plugin.running;
+    const sendLabel = sending ? "стоп" : "отправить";
     setIcon(this.sendEl, sending ? "square" : "arrow-up");
-    this.sendEl.ariaLabel = sending ? "стоп" : "отправить";
-    this.sendEl.title = sending ? "стоп" : "отправить";
+    this.sendEl.ariaLabel = sendLabel;
+    setTooltip(this.sendEl, sendLabel);
   }
 
   private onSend() {
@@ -512,7 +532,9 @@ class AgentView extends ItemView {
       for (const item of providers) select.add(new Option(providerLabel(item), item.id));
       this.providerSignature = signature;
     }
-    select.hidden = providers.length < 2;
+    const hideProvider = providers.length < 2;
+    select.hidden = hideProvider;
+    if (select.parentElement) select.parentElement.hidden = hideProvider;
     const wanted = providers.some((item) => item.id === this.plugin.settings.activeId) ? this.plugin.settings.activeId : "";
     if (select.value !== wanted) select.value = wanted;
   }

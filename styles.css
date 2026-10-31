@@ -6,8 +6,13 @@
   padding: 8px;
 }
 
+.agent-root [hidden] {
+  display: none !important;
+}
+
 .agent-log {
   flex: 1;
+  min-height: 0;
   overflow: auto;
   display: flex;
   flex-direction: column;
@@ -64,43 +69,75 @@
   to { transform: rotate(360deg); }
 }
 
+.agent-chatbar,
+.agent-composer {
+  flex-shrink: 0;
+}
+
 .agent-chatbar {
   display: flex;
   gap: 4px;
   align-items: center;
 }
 
-.agent-chatbar select {
+.agent-picker {
+  position: relative;
+  display: flex;
+  align-items: center;
   flex: 1;
   min-width: 0;
+}
+
+.agent-picker select {
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  appearance: none;
+  -webkit-appearance: none;
   background: transparent;
   border: none;
   box-shadow: none;
+  color: var(--text-normal);
   font-size: 0.9em;
+  padding: 4px 22px 4px 2px;
 }
 
-button.agent-icon {
-  all: unset;
+.agent-picker-mark {
+  position: absolute;
+  right: 6px;
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid var(--text-muted);
+  border-bottom: 1.5px solid var(--text-muted);
+  transform: rotate(45deg) translateY(-2px);
+  pointer-events: none;
+}
+
+.agent-root .agent-icon.clickable-icon {
   box-sizing: border-box;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  margin: 0;
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-muted);
-  cursor: pointer;
+  color: var(--icon-color);
   border-radius: 6px;
 }
 
-button.agent-icon svg {
-  width: 16px;
-  height: 16px;
+.agent-root .agent-icon.clickable-icon svg.svg-icon {
+  display: block;
+  width: 18px;
+  height: 18px;
+  color: inherit;
+  stroke: currentColor;
 }
 
-button.agent-icon:hover {
-  color: var(--text-normal);
-  background: var(--background-modifier-hover);
+.agent-root .agent-icon.clickable-icon:hover {
+  color: var(--icon-color-hover);
+  background-color: var(--background-modifier-hover);
 }
 
 .agent-composer {
@@ -134,6 +171,16 @@ button.agent-icon:hover {
   white-space: nowrap;
 }
 
+.agent-chip .agent-icon.clickable-icon {
+  width: 26px;
+  height: 26px;
+}
+
+.agent-chip .agent-icon.clickable-icon svg.svg-icon {
+  width: 14px;
+  height: 14px;
+}
+
 .agent-root textarea {
   width: 100%;
   box-sizing: border-box;
@@ -149,24 +196,20 @@ button.agent-icon:hover {
   align-items: center;
 }
 
-.agent-composer-bar select.agent-model {
-  flex: 1;
-  min-width: 0;
-  background: transparent;
-  border: none;
-  box-shadow: none;
-  font-size: 0.85em;
-}
-
-button.agent-send {
-  width: 32px;
-  height: 32px;
+.agent-root .agent-send.clickable-icon,
+.agent-root .agent-send.clickable-icon:hover {
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
-  background: var(--interactive-accent);
+  background-color: var(--interactive-accent);
   color: var(--text-on-accent);
 }
 
-button.agent-send:hover {
-  background: var(--interactive-accent-hover);
+.agent-root .agent-send.clickable-icon:hover {
+  background-color: var(--interactive-accent-hover);
+}
+
+.agent-root .agent-send.clickable-icon svg.svg-icon {
   color: var(--text-on-accent);
+  stroke: currentColor;
 }

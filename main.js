@@ -548,7 +548,10 @@ var AgentPlugin = class extends import_obsidian.Plugin {
       return;
     }
     const current = this.activeSession();
-    if (current && current.lines.length === 0 && current.history.length === 0) return;
+    if (current && current.lines.length === 0 && current.history.length === 0) {
+      new import_obsidian.Notice("\u044D\u0442\u043E\u0442 \u0447\u0430\u0442 \u0443\u0436\u0435 \u043F\u0443\u0441\u0442\u043E\u0439");
+      return;
+    }
     const session = newSession();
     this.sessions.unshift(session);
     this.sessionId = session.id;
@@ -765,9 +768,24 @@ var AgentPlugin = class extends import_obsidian.Plugin {
   }
 };
 function iconButton(parent, icon, label) {
-  const button = parent.createEl("button", { cls: "agent-icon", attr: { "aria-label": label, title: label } });
+  const button = parent.createDiv({
+    cls: "clickable-icon agent-icon",
+    attr: { role: "button", tabindex: "0", "aria-label": label }
+  });
   (0, import_obsidian.setIcon)(button, icon);
+  (0, import_obsidian.setTooltip)(button, label);
+  button.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    button.click();
+  });
   return button;
+}
+function picker(parent) {
+  const wrap = parent.createDiv({ cls: "agent-picker" });
+  const select = wrap.createEl("select");
+  wrap.createDiv({ cls: "agent-picker-mark", attr: { "aria-hidden": "true" } });
+  return select;
 }
 async function copyLine(text) {
   var _a;
@@ -821,7 +839,7 @@ var AgentView = class extends import_obsidian.ItemView {
     this.noteEl = root.createDiv({ cls: "agent-note" });
     this.logEl = root.createDiv({ cls: "agent-log" });
     const chatRow = root.createDiv({ cls: "agent-chatbar" });
-    this.chatEl = chatRow.createEl("select");
+    this.chatEl = picker(chatRow);
     this.chatEl.addEventListener("change", () => {
       var _a, _b;
       const value = (_b = (_a = this.chatEl) == null ? void 0 : _a.value) != null ? _b : "";
@@ -839,7 +857,7 @@ var AgentView = class extends import_obsidian.ItemView {
     this.inputEl = composer.createEl("textarea", { attr: { rows: "3", placeholder: "\u0417\u0430\u0434\u0430\u043D\u0438\u0435 \u0434\u043B\u044F \u0437\u0430\u043C\u0435\u0442\u043A\u0438 \u0432 \u0444\u043E\u043A\u0443\u0441\u0435" } });
     const bar = composer.createDiv({ cls: "agent-composer-bar" });
     iconButton(bar, "at-sign", "\u0442\u0435\u043A\u0443\u0449\u0438\u0439 \u0444\u0430\u0439\u043B").addEventListener("click", () => void this.plugin.focusOpenNote());
-    this.modelEl = bar.createEl("select", { cls: "agent-model" });
+    this.modelEl = picker(bar);
     this.modelEl.addEventListener("change", () => {
       var _a, _b;
       const provider = this.plugin.activeProvider();
@@ -848,7 +866,7 @@ var AgentView = class extends import_obsidian.ItemView {
       provider.model = value;
       void this.plugin.saveSettings();
     });
-    this.providerEl = bar.createEl("select", { cls: "agent-model" });
+    this.providerEl = picker(bar);
     this.providerEl.addEventListener("change", () => {
       if (!this.providerEl) return;
       this.plugin.settings.activeId = this.providerEl.value;
@@ -901,9 +919,10 @@ var AgentView = class extends import_obsidian.ItemView {
     if (this.plugin.running) this.logEl.createDiv({ cls: "agent-spin", attr: { "aria-label": "\u0430\u0433\u0435\u043D\u0442 \u0440\u0430\u0431\u043E\u0442\u0430\u0435\u0442" } });
     this.logEl.scrollTop = this.logEl.scrollHeight;
     const sending = this.plugin.running;
+    const sendLabel = sending ? "\u0441\u0442\u043E\u043F" : "\u043E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C";
     (0, import_obsidian.setIcon)(this.sendEl, sending ? "square" : "arrow-up");
-    this.sendEl.ariaLabel = sending ? "\u0441\u0442\u043E\u043F" : "\u043E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C";
-    this.sendEl.title = sending ? "\u0441\u0442\u043E\u043F" : "\u043E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C";
+    this.sendEl.ariaLabel = sendLabel;
+    (0, import_obsidian.setTooltip)(this.sendEl, sendLabel);
   }
   onSend() {
     var _a, _b;
@@ -928,7 +947,9 @@ var AgentView = class extends import_obsidian.ItemView {
       for (const item of providers) select.add(new Option(providerLabel(item), item.id));
       this.providerSignature = signature;
     }
-    select.hidden = providers.length < 2;
+    const hideProvider = providers.length < 2;
+    select.hidden = hideProvider;
+    if (select.parentElement) select.parentElement.hidden = hideProvider;
     const wanted = providers.some((item) => item.id === this.plugin.settings.activeId) ? this.plugin.settings.activeId : "";
     if (select.value !== wanted) select.value = wanted;
   }
