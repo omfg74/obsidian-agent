@@ -796,6 +796,7 @@ var AgentView = class extends import_obsidian.ItemView {
         }
       }
     }
+    if (this.plugin.running) this.logEl.createDiv({ cls: "agent-spin", attr: { "aria-label": "\u0430\u0433\u0435\u043D\u0442 \u0440\u0430\u0431\u043E\u0442\u0430\u0435\u0442" } });
     this.logEl.scrollTop = this.logEl.scrollHeight;
     this.sendEl.setText(this.plugin.running ? "\u0441\u0442\u043E\u043F" : "\u043E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C");
   }

@@ -392,6 +392,7 @@ class AgentView extends ItemView {
         }
       }
     }
+    if (this.plugin.running) this.logEl.createDiv({ cls: "agent-spin", attr: { "aria-label": "агент работает" } });
     this.logEl.scrollTop = this.logEl.scrollHeight;
     this.sendEl.setText(this.plugin.running ? "стоп" : "отправить");
   }

@@ -47,6 +47,20 @@
   color: var(--text-error);
 }
 
+.agent-spin {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border: 2px solid var(--background-modifier-border);
+  border-top-color: var(--text-muted);
+  border-radius: 50%;
+  animation: agent-turn 0.8s linear infinite;
+}
+
+@keyframes agent-turn {
+  to { transform: rotate(360deg); }
+}
+
 .agent-provider {
   width: 100%;
 }
