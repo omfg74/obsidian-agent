@@ -11,6 +11,7 @@ export default class AgentPlugin extends Plugin {
   settings: AgentSettings = freshSettings();
   sessions: Session[] = [];
   sessionId = "";
+  lastNote = "";
   running = false;
   stop = false;
   view: AgentView | null = null;
@@ -22,6 +23,24 @@ export default class AgentPlugin extends Plugin {
     this.addCommand({ id: "open", name: "Открыть", callback: () => this.activate() });
     this.addCommand({ id: "new-chat", name: "Новый чат", callback: () => void this.newChat() });
     this.addSettingTab(new AgentSettingTab(this.app, this));
+    this.registerEvent(this.app.workspace.on("active-leaf-change", () => this.rememberNote()));
+    this.rememberNote();
+  }
+
+  private rememberNote() {
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (view?.file) this.lastNote = view.file.path;
+  }
+
+  private markdownView(): MarkdownView | null {
+    const active = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (active?.file) return active;
+    if (!this.lastNote) return null;
+    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      const view = leaf.view;
+      if (view instanceof MarkdownView && view.file?.path === this.lastNote) return view;
+    }
+    return null;
   }
 
   async loadSettings() {
@@ -167,7 +186,8 @@ export default class AgentPlugin extends Plugin {
     }
     const active = this.activePath();
     const selected = this.selection();
-    const prompt = [selected ? "Выделение:\n" + selected : "", "Задание:\n" + task].filter(Boolean).join("\n\n");
+    const where = active ? "Открытый файл: " + active : "Открытого файла нет.";
+    const prompt = [where, selected ? "Выделение:\n" + selected : "", "Задание:\n" + task].filter(Boolean).join("\n\n");
     session.history.push({ role: "user", content: prompt });
     this.push({ kind: "user", text: task });
     this.running = true;
@@ -200,11 +220,12 @@ export default class AgentPlugin extends Plugin {
   }
 
   private activePath(): string {
-    return this.app.workspace.getActiveViewOfType(MarkdownView)?.file?.path ?? "";
+    this.rememberNote();
+    return this.markdownView()?.file?.path ?? "";
   }
 
   private selection(): string {
-    return this.app.workspace.getActiveViewOfType(MarkdownView)?.editor.getSelection() ?? "";
+    return this.markdownView()?.editor.getSelection() ?? "";
   }
 
   private async post(base: string, key: string, model: string, messages: ChatMessage[]) {
@@ -246,8 +267,8 @@ export default class AgentPlugin extends Plugin {
         const file = app.vault.getAbstractFileByPath(path);
         if (file instanceof TFolder) throw new Error("это папка");
         if (file instanceof TFile) {
-          const view = app.workspace.getActiveViewOfType(MarkdownView);
-          if (view?.file?.path === path) {
+          const view = app.workspace.getLeavesOfType("markdown").map((leaf) => leaf.view).find((item): item is MarkdownView => item instanceof MarkdownView && item.file?.path === path);
+          if (view) {
             view.editor.setValue(content);
             return;
           }

@@ -94,7 +94,9 @@ export const TOOLS = [
 ];
 
 export function systemPrompt(activePath: string): string {
-  const where = activePath ? "Открыта заметка: " + activePath : "Заметка не открыта.";
+  const where = activePath
+    ? "Открыта заметка: " + activePath + ". «Этот файл», «эта заметка» и «здесь» — это она. Такой запрос правь в ней, другой файл не создавай."
+    : "Заметка не открыта. Не выдумывай путь к файлу.";
   return [
     "Ты агент внутри Obsidian. Хранилище смотри только инструментами, не выдумывай текст файлов и картинок.",
     "Картинку сначала открой через view_image. Маленькую правку делай через search_replace.",

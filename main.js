@@ -96,7 +96,7 @@ var TOOLS = [
   }
 ];
 function systemPrompt(activePath) {
-  const where = activePath ? "\u041E\u0442\u043A\u0440\u044B\u0442\u0430 \u0437\u0430\u043C\u0435\u0442\u043A\u0430: " + activePath : "\u0417\u0430\u043C\u0435\u0442\u043A\u0430 \u043D\u0435 \u043E\u0442\u043A\u0440\u044B\u0442\u0430.";
+  const where = activePath ? "\u041E\u0442\u043A\u0440\u044B\u0442\u0430 \u0437\u0430\u043C\u0435\u0442\u043A\u0430: " + activePath + ". \xAB\u042D\u0442\u043E\u0442 \u0444\u0430\u0439\u043B\xBB, \xAB\u044D\u0442\u0430 \u0437\u0430\u043C\u0435\u0442\u043A\u0430\xBB \u0438 \xAB\u0437\u0434\u0435\u0441\u044C\xBB \u2014 \u044D\u0442\u043E \u043E\u043D\u0430. \u0422\u0430\u043A\u043E\u0439 \u0437\u0430\u043F\u0440\u043E\u0441 \u043F\u0440\u0430\u0432\u044C \u0432 \u043D\u0435\u0439, \u0434\u0440\u0443\u0433\u043E\u0439 \u0444\u0430\u0439\u043B \u043D\u0435 \u0441\u043E\u0437\u0434\u0430\u0432\u0430\u0439." : "\u0417\u0430\u043C\u0435\u0442\u043A\u0430 \u043D\u0435 \u043E\u0442\u043A\u0440\u044B\u0442\u0430. \u041D\u0435 \u0432\u044B\u0434\u0443\u043C\u044B\u0432\u0430\u0439 \u043F\u0443\u0442\u044C \u043A \u0444\u0430\u0439\u043B\u0443.";
   return [
     "\u0422\u044B \u0430\u0433\u0435\u043D\u0442 \u0432\u043D\u0443\u0442\u0440\u0438 Obsidian. \u0425\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435 \u0441\u043C\u043E\u0442\u0440\u0438 \u0442\u043E\u043B\u044C\u043A\u043E \u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442\u0430\u043C\u0438, \u043D\u0435 \u0432\u044B\u0434\u0443\u043C\u044B\u0432\u0430\u0439 \u0442\u0435\u043A\u0441\u0442 \u0444\u0430\u0439\u043B\u043E\u0432 \u0438 \u043A\u0430\u0440\u0442\u0438\u043D\u043E\u043A.",
     "\u041A\u0430\u0440\u0442\u0438\u043D\u043A\u0443 \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u043E\u0442\u043A\u0440\u043E\u0439 \u0447\u0435\u0440\u0435\u0437 view_image. \u041C\u0430\u043B\u0435\u043D\u044C\u043A\u0443\u044E \u043F\u0440\u0430\u0432\u043A\u0443 \u0434\u0435\u043B\u0430\u0439 \u0447\u0435\u0440\u0435\u0437 search_replace.",
@@ -429,6 +429,7 @@ var AgentPlugin = class extends import_obsidian.Plugin {
     this.settings = freshSettings();
     this.sessions = [];
     this.sessionId = "";
+    this.lastNote = "";
     this.running = false;
     this.stop = false;
     this.view = null;
@@ -440,6 +441,23 @@ var AgentPlugin = class extends import_obsidian.Plugin {
     this.addCommand({ id: "open", name: "\u041E\u0442\u043A\u0440\u044B\u0442\u044C", callback: () => this.activate() });
     this.addCommand({ id: "new-chat", name: "\u041D\u043E\u0432\u044B\u0439 \u0447\u0430\u0442", callback: () => void this.newChat() });
     this.addSettingTab(new AgentSettingTab(this.app, this));
+    this.registerEvent(this.app.workspace.on("active-leaf-change", () => this.rememberNote()));
+    this.rememberNote();
+  }
+  rememberNote() {
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
+    if (view == null ? void 0 : view.file) this.lastNote = view.file.path;
+  }
+  markdownView() {
+    var _a;
+    const active = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
+    if (active == null ? void 0 : active.file) return active;
+    if (!this.lastNote) return null;
+    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      const view = leaf.view;
+      if (view instanceof import_obsidian.MarkdownView && ((_a = view.file) == null ? void 0 : _a.path) === this.lastNote) return view;
+    }
+    return null;
   }
   async loadSettings() {
     const saved = await this.loadData();
@@ -577,7 +595,8 @@ var AgentPlugin = class extends import_obsidian.Plugin {
     }
     const active = this.activePath();
     const selected = this.selection();
-    const prompt = [selected ? "\u0412\u044B\u0434\u0435\u043B\u0435\u043D\u0438\u0435:\n" + selected : "", "\u0417\u0430\u0434\u0430\u043D\u0438\u0435:\n" + task].filter(Boolean).join("\n\n");
+    const where = active ? "\u041E\u0442\u043A\u0440\u044B\u0442\u044B\u0439 \u0444\u0430\u0439\u043B: " + active : "\u041E\u0442\u043A\u0440\u044B\u0442\u043E\u0433\u043E \u0444\u0430\u0439\u043B\u0430 \u043D\u0435\u0442.";
+    const prompt = [where, selected ? "\u0412\u044B\u0434\u0435\u043B\u0435\u043D\u0438\u0435:\n" + selected : "", "\u0417\u0430\u0434\u0430\u043D\u0438\u0435:\n" + task].filter(Boolean).join("\n\n");
     session.history.push({ role: "user", content: prompt });
     this.push({ kind: "user", text: task });
     this.running = true;
@@ -610,11 +629,12 @@ var AgentPlugin = class extends import_obsidian.Plugin {
   }
   activePath() {
     var _a, _b, _c;
-    return (_c = (_b = (_a = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView)) == null ? void 0 : _a.file) == null ? void 0 : _b.path) != null ? _c : "";
+    this.rememberNote();
+    return (_c = (_b = (_a = this.markdownView()) == null ? void 0 : _a.file) == null ? void 0 : _b.path) != null ? _c : "";
   }
   selection() {
     var _a, _b;
-    return (_b = (_a = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView)) == null ? void 0 : _a.editor.getSelection()) != null ? _b : "";
+    return (_b = (_a = this.markdownView()) == null ? void 0 : _a.editor.getSelection()) != null ? _b : "";
   }
   async post(base, key, model, messages) {
     var _a, _b, _c;
@@ -652,12 +672,14 @@ var AgentPlugin = class extends import_obsidian.Plugin {
         return app.vault.read(file);
       },
       async write(path, content) {
-        var _a;
         const file = app.vault.getAbstractFileByPath(path);
         if (file instanceof import_obsidian.TFolder) throw new Error("\u044D\u0442\u043E \u043F\u0430\u043F\u043A\u0430");
         if (file instanceof import_obsidian.TFile) {
-          const view = app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
-          if (((_a = view == null ? void 0 : view.file) == null ? void 0 : _a.path) === path) {
+          const view = app.workspace.getLeavesOfType("markdown").map((leaf) => leaf.view).find((item) => {
+            var _a;
+            return item instanceof import_obsidian.MarkdownView && ((_a = item.file) == null ? void 0 : _a.path) === path;
+          });
+          if (view) {
             view.editor.setValue(content);
             return;
           }

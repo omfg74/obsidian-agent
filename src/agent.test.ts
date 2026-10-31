@@ -4,6 +4,12 @@ import { runAgent, systemPrompt } from "./agent.ts";
 import { replaceOnce } from "./replace.ts";
 import { dispatchTool, resolvePath, type VaultFs } from "./vault.ts";
 
+test("открытая заметка названа в подсказке", () => {
+  const prompt = systemPrompt("уг.md");
+  assert.match(prompt, /Открыта заметка: уг\.md/);
+  assert.match(prompt, /другой файл не создавай/);
+});
+
 test("replaceOnce меняет одно вхождение", () => {
   assert.equal(replaceOnce("абвгде", "абв", "я"), "ягде");
 });
