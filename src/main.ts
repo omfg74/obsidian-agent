@@ -34,6 +34,23 @@ export default class AgentPlugin extends Plugin {
     return this.settings.providers.find((item) => item.id === this.settings.activeId) ?? null;
   }
 
+  async fetchModelIds(provider: Provider): Promise<string[]> {
+    const base = provider.base.trim().replace(/\/$/, "");
+    const key = provider.key.trim();
+    if (!base || !key) throw new Error("укажи адрес API и ключ");
+    const res = await requestUrl({
+      url: base + "/models",
+      method: "GET",
+      headers: { Authorization: "Bearer " + key },
+      throw: false,
+    });
+    if (res.status < 200 || res.status >= 300) {
+      const body = (res.text || "").slice(0, 500);
+      throw new Error("список моделей ответил " + res.status + (body ? ": " + body : ""));
+    }
+    return modelIds(res.json);
+  }
+
   async saveSettings() {
     await this.saveData(this.settings);
   }
@@ -203,6 +220,10 @@ class AgentView extends ItemView {
   sendEl: HTMLButtonElement | null = null;
   providerEl: HTMLSelectElement | null = null;
   providerSignature = "";
+  modelEl: HTMLSelectElement | null = null;
+  modelSignature = "";
+  modelState: { providerId: string; ids: string[] } | { providerId: string; error: string } | null = null;
+  modelLoading = "";
 
   constructor(leaf: WorkspaceLeaf, plugin: AgentPlugin) {
     super(leaf);
@@ -230,6 +251,17 @@ class AgentView extends ItemView {
     this.providerEl.addEventListener("change", () => {
       if (!this.providerEl) return;
       this.plugin.settings.activeId = this.providerEl.value;
+      this.modelState = null;
+      void this.plugin.saveSettings();
+      this.syncModelSelect();
+      void this.loadChatModels();
+    });
+    this.modelEl = root.createEl("select", { cls: "agent-provider" });
+    this.modelEl.addEventListener("change", () => {
+      const provider = this.plugin.activeProvider();
+      const value = this.modelEl?.value.trim() ?? "";
+      if (!provider || !value) return;
+      provider.model = value;
       void this.plugin.saveSettings();
     });
     this.logEl = root.createDiv({ cls: "agent-log" });
@@ -249,6 +281,10 @@ class AgentView extends ItemView {
   paint() {
     if (!this.logEl || !this.sendEl) return;
     this.syncProviderSelect();
+    this.syncModelSelect();
+    const provider = this.plugin.activeProvider();
+    const listed = this.modelState?.providerId === provider?.id;
+    if (provider?.base.trim() && provider.key.trim() && !listed && this.modelLoading !== provider.id) void this.loadChatModels();
     this.logEl.empty();
     for (const line of this.plugin.lines) {
       this.logEl.createDiv({ cls: "agent-line agent-" + line.kind, text: line.text });
@@ -282,6 +318,50 @@ class AgentView extends ItemView {
     }
     const wanted = providers.some((item) => item.id === this.plugin.settings.activeId) ? this.plugin.settings.activeId : "";
     if (select.value !== wanted) select.value = wanted;
+  }
+
+  private syncModelSelect() {
+    const select = this.modelEl;
+    if (!select) return;
+    const provider = this.plugin.activeProvider();
+    const ids = provider && this.modelState?.providerId === provider.id && "ids" in this.modelState ? this.modelState.ids : [];
+    const current = provider?.model.trim() ?? "";
+    const placeholder = !provider ? "выбери провайдера" : !current && ids.length === 0 ? "нет списка моделей" : !current ? "выбери модель" : "";
+    const signature = (provider?.id ?? "") + "\0" + placeholder + "\0" + current + "\0" + ids.join("\n");
+    if (this.modelSignature !== signature) {
+      while (select.options.length > 0) select.remove(0);
+      if (placeholder) select.add(new Option(placeholder, ""));
+      if (current && !ids.includes(current)) select.add(new Option(current, current));
+      for (const id of ids) select.add(new Option(id, id));
+      this.modelSignature = signature;
+    }
+    const wanted = current && Array.from(select.options).some((option) => option.value === current) ? current : "";
+    if (select.value !== wanted) select.value = wanted;
+  }
+
+  private async loadChatModels() {
+    const provider = this.plugin.activeProvider();
+    if (!provider || !provider.base.trim() || !provider.key.trim()) {
+      this.modelState = null;
+      this.syncModelSelect();
+      return;
+    }
+    const id = provider.id;
+    if (this.modelLoading === id) return;
+    this.modelLoading = id;
+    try {
+      const ids = await this.plugin.fetchModelIds(provider);
+      if (this.modelLoading !== id) return;
+      this.modelState = { providerId: id, ids };
+    } catch (err) {
+      if (this.modelLoading !== id) return;
+      const message = err instanceof Error ? err.message : String(err);
+      this.modelState = { providerId: id, error: message };
+      this.plugin.push({ kind: "error", text: message });
+    } finally {
+      if (this.modelLoading === id) this.modelLoading = "";
+      this.syncModelSelect();
+    }
   }
 }
 
@@ -364,6 +444,7 @@ class AgentSettingTab extends PluginSettingTab {
         if (!value.trim()) return;
         provider.model = value.trim();
         await this.plugin.saveSettings();
+        this.plugin.paint();
       });
     });
     modelSetting.addButton((button) => button.setButtonText("обновить").onClick(() => {
@@ -402,25 +483,12 @@ class AgentSettingTab extends PluginSettingTab {
   }
 
   private async fillModels(setting: Setting, dropdown: DropdownComponent, provider: Provider) {
-    const base = provider.base.trim().replace(/\/$/, "");
-    const key = provider.key.trim();
-    if (!base || !key) {
+    if (!provider.base.trim() || !provider.key.trim()) {
       setting.setDesc("укажи адрес API и ключ, затем нажми «обновить»");
       return;
     }
     try {
-      const res = await requestUrl({
-        url: base + "/models",
-        method: "GET",
-        headers: { Authorization: "Bearer " + key },
-        throw: false,
-      });
-      if (this.plugin.settings.activeId !== provider.id) return;
-      if (res.status < 200 || res.status >= 300) {
-        const body = (res.text || "").slice(0, 500);
-        throw new Error("список моделей ответил " + res.status + (body ? ": " + body : ""));
-      }
-      const ids = modelIds(res.json);
+      const ids = await this.plugin.fetchModelIds(provider);
       if (this.plugin.settings.activeId !== provider.id) return;
       const current = provider.model.trim();
       dropdown.selectEl.length = 0;

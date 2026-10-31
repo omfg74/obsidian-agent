@@ -353,6 +353,22 @@ var AgentPlugin = class extends import_obsidian.Plugin {
     var _a;
     return (_a = this.settings.providers.find((item) => item.id === this.settings.activeId)) != null ? _a : null;
   }
+  async fetchModelIds(provider) {
+    const base = provider.base.trim().replace(/\/$/, "");
+    const key = provider.key.trim();
+    if (!base || !key) throw new Error("\u0443\u043A\u0430\u0436\u0438 \u0430\u0434\u0440\u0435\u0441 API \u0438 \u043A\u043B\u044E\u0447");
+    const res = await (0, import_obsidian.requestUrl)({
+      url: base + "/models",
+      method: "GET",
+      headers: { Authorization: "Bearer " + key },
+      throw: false
+    });
+    if (res.status < 200 || res.status >= 300) {
+      const body = (res.text || "").slice(0, 500);
+      throw new Error("\u0441\u043F\u0438\u0441\u043E\u043A \u043C\u043E\u0434\u0435\u043B\u0435\u0439 \u043E\u0442\u0432\u0435\u0442\u0438\u043B " + res.status + (body ? ": " + body : ""));
+    }
+    return modelIds(res.json);
+  }
   async saveSettings() {
     await this.saveData(this.settings);
   }
@@ -519,6 +535,10 @@ var AgentView = class extends import_obsidian.ItemView {
     this.sendEl = null;
     this.providerEl = null;
     this.providerSignature = "";
+    this.modelEl = null;
+    this.modelSignature = "";
+    this.modelState = null;
+    this.modelLoading = "";
     this.plugin = plugin;
   }
   getViewType() {
@@ -539,6 +559,18 @@ var AgentView = class extends import_obsidian.ItemView {
     this.providerEl.addEventListener("change", () => {
       if (!this.providerEl) return;
       this.plugin.settings.activeId = this.providerEl.value;
+      this.modelState = null;
+      void this.plugin.saveSettings();
+      this.syncModelSelect();
+      void this.loadChatModels();
+    });
+    this.modelEl = root.createEl("select", { cls: "agent-provider" });
+    this.modelEl.addEventListener("change", () => {
+      var _a, _b;
+      const provider = this.plugin.activeProvider();
+      const value = (_b = (_a = this.modelEl) == null ? void 0 : _a.value.trim()) != null ? _b : "";
+      if (!provider || !value) return;
+      provider.model = value;
       void this.plugin.saveSettings();
     });
     this.logEl = root.createDiv({ cls: "agent-log" });
@@ -554,8 +586,13 @@ var AgentView = class extends import_obsidian.ItemView {
     if (this.plugin.view === this) this.plugin.view = null;
   }
   paint() {
+    var _a;
     if (!this.logEl || !this.sendEl) return;
     this.syncProviderSelect();
+    this.syncModelSelect();
+    const provider = this.plugin.activeProvider();
+    const listed = ((_a = this.modelState) == null ? void 0 : _a.providerId) === (provider == null ? void 0 : provider.id);
+    if ((provider == null ? void 0 : provider.base.trim()) && provider.key.trim() && !listed && this.modelLoading !== provider.id) void this.loadChatModels();
     this.logEl.empty();
     for (const line of this.plugin.lines) {
       this.logEl.createDiv({ cls: "agent-line agent-" + line.kind, text: line.text });
@@ -588,6 +625,49 @@ var AgentView = class extends import_obsidian.ItemView {
     }
     const wanted = providers.some((item) => item.id === this.plugin.settings.activeId) ? this.plugin.settings.activeId : "";
     if (select.value !== wanted) select.value = wanted;
+  }
+  syncModelSelect() {
+    var _a, _b, _c;
+    const select = this.modelEl;
+    if (!select) return;
+    const provider = this.plugin.activeProvider();
+    const ids = provider && ((_a = this.modelState) == null ? void 0 : _a.providerId) === provider.id && "ids" in this.modelState ? this.modelState.ids : [];
+    const current = (_b = provider == null ? void 0 : provider.model.trim()) != null ? _b : "";
+    const placeholder = !provider ? "\u0432\u044B\u0431\u0435\u0440\u0438 \u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440\u0430" : !current && ids.length === 0 ? "\u043D\u0435\u0442 \u0441\u043F\u0438\u0441\u043A\u0430 \u043C\u043E\u0434\u0435\u043B\u0435\u0439" : !current ? "\u0432\u044B\u0431\u0435\u0440\u0438 \u043C\u043E\u0434\u0435\u043B\u044C" : "";
+    const signature = ((_c = provider == null ? void 0 : provider.id) != null ? _c : "") + "\0" + placeholder + "\0" + current + "\0" + ids.join("\n");
+    if (this.modelSignature !== signature) {
+      while (select.options.length > 0) select.remove(0);
+      if (placeholder) select.add(new Option(placeholder, ""));
+      if (current && !ids.includes(current)) select.add(new Option(current, current));
+      for (const id of ids) select.add(new Option(id, id));
+      this.modelSignature = signature;
+    }
+    const wanted = current && Array.from(select.options).some((option) => option.value === current) ? current : "";
+    if (select.value !== wanted) select.value = wanted;
+  }
+  async loadChatModels() {
+    const provider = this.plugin.activeProvider();
+    if (!provider || !provider.base.trim() || !provider.key.trim()) {
+      this.modelState = null;
+      this.syncModelSelect();
+      return;
+    }
+    const id = provider.id;
+    if (this.modelLoading === id) return;
+    this.modelLoading = id;
+    try {
+      const ids = await this.plugin.fetchModelIds(provider);
+      if (this.modelLoading !== id) return;
+      this.modelState = { providerId: id, ids };
+    } catch (err) {
+      if (this.modelLoading !== id) return;
+      const message = err instanceof Error ? err.message : String(err);
+      this.modelState = { providerId: id, error: message };
+      this.plugin.push({ kind: "error", text: message });
+    } finally {
+      if (this.modelLoading === id) this.modelLoading = "";
+      this.syncModelSelect();
+    }
   }
 };
 var AgentSettingTab = class extends import_obsidian.PluginSettingTab {
@@ -653,6 +733,7 @@ var AgentSettingTab = class extends import_obsidian.PluginSettingTab {
         if (!value.trim()) return;
         provider.model = value.trim();
         await this.plugin.saveSettings();
+        this.plugin.paint();
       });
     });
     modelSetting.addButton((button) => button.setButtonText("\u043E\u0431\u043D\u043E\u0432\u0438\u0442\u044C").onClick(() => {
@@ -688,25 +769,12 @@ var AgentSettingTab = class extends import_obsidian.PluginSettingTab {
     this.display();
   }
   async fillModels(setting, dropdown, provider) {
-    const base = provider.base.trim().replace(/\/$/, "");
-    const key = provider.key.trim();
-    if (!base || !key) {
+    if (!provider.base.trim() || !provider.key.trim()) {
       setting.setDesc("\u0443\u043A\u0430\u0436\u0438 \u0430\u0434\u0440\u0435\u0441 API \u0438 \u043A\u043B\u044E\u0447, \u0437\u0430\u0442\u0435\u043C \u043D\u0430\u0436\u043C\u0438 \xAB\u043E\u0431\u043D\u043E\u0432\u0438\u0442\u044C\xBB");
       return;
     }
     try {
-      const res = await (0, import_obsidian.requestUrl)({
-        url: base + "/models",
-        method: "GET",
-        headers: { Authorization: "Bearer " + key },
-        throw: false
-      });
-      if (this.plugin.settings.activeId !== provider.id) return;
-      if (res.status < 200 || res.status >= 300) {
-        const body = (res.text || "").slice(0, 500);
-        throw new Error("\u0441\u043F\u0438\u0441\u043E\u043A \u043C\u043E\u0434\u0435\u043B\u0435\u0439 \u043E\u0442\u0432\u0435\u0442\u0438\u043B " + res.status + (body ? ": " + body : ""));
-      }
-      const ids = modelIds(res.json);
+      const ids = await this.plugin.fetchModelIds(provider);
       if (this.plugin.settings.activeId !== provider.id) return;
       const current = provider.model.trim();
       dropdown.selectEl.length = 0;
