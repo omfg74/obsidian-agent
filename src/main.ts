@@ -1,8 +1,8 @@
-import { ItemView, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf, requestUrl, type App, type DropdownComponent } from "obsidian";
+import { ItemView, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf, requestUrl, setIcon, type App, type DropdownComponent } from "obsidian";
 import { TOOLS, runAgent, systemPrompt, type ChatMessage } from "./agent.ts";
 import { newSession, sessionTitle, sessionsFromSaved, stripImages, type ChatLine, type Session } from "./chats.ts";
 import { modelIds } from "./models.ts";
-import { freshSettings, newProviderId, settingsFromSaved, type AgentSettings, type Provider } from "./settings.ts";
+import { freshSettings, newProviderId, providerLabel, settingsFromSaved, type AgentSettings, type Provider } from "./settings.ts";
 import { dispatchTool, type VaultFs } from "./vault.ts";
 
 const VIEW = "obsidian-agent";
@@ -33,10 +33,24 @@ export default class AgentPlugin extends Plugin {
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (!view?.file) return;
     this.lastNote = view.file.path;
-    if (!this.focusFollow || this.focusPath === view.file.path) return;
+    if (this.focusPath === view.file.path) return;
     this.focusPath = view.file.path;
+    this.focusFollow = true;
     void this.saveSettings();
     this.paint();
+  }
+
+  openNotePath(): string {
+    const active = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (active?.file) return active.file.path;
+    const open: string[] = [];
+    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      const view = leaf.view;
+      if (view instanceof MarkdownView && view.file) open.push(view.file.path);
+    }
+    if (this.lastNote && open.includes(this.lastNote)) return this.lastNote;
+    if (open.length === 1) return open[0];
+    return "";
   }
 
   async focusOpenNote() {
@@ -327,6 +341,18 @@ export default class AgentPlugin extends Plugin {
   }
 }
 
+function iconButton(parent: HTMLElement, icon: string, label: string): HTMLButtonElement {
+  const button = parent.createEl("button", { cls: "agent-icon", attr: { "aria-label": label, title: label } });
+  setIcon(button, icon);
+  return button;
+}
+
+function fileLabel(path: string, paths: string[]): string {
+  const base = path.split("/").pop() || path;
+  const same = paths.filter((item) => (item.split("/").pop() || item) === base);
+  return same.length > 1 ? path : base;
+}
+
 async function copyLine(text: string) {
   const write = navigator.clipboard?.writeText;
   if (typeof write !== "function") {
@@ -382,7 +408,35 @@ class AgentView extends ItemView {
     const root = this.contentEl;
     root.empty();
     root.addClass("agent-root");
-    this.providerEl = root.createEl("select", { cls: "agent-provider" });
+    const tools = root.createDiv({ cls: "agent-tools" });
+    this.chatEl = tools.createEl("select");
+    this.chatEl.addEventListener("change", () => {
+      const value = this.chatEl?.value ?? "";
+      if (!value) return;
+      void this.plugin.openSession(value);
+    });
+    iconButton(tools, "plus", "новый чат").addEventListener("click", () => void this.plugin.newChat());
+    iconButton(tools, "trash", "убрать чат").addEventListener("click", () => void this.plugin.deleteSession());
+    this.noteEl = root.createDiv({ cls: "agent-tool" });
+    this.logEl = root.createDiv({ cls: "agent-log" });
+    const composer = root.createDiv({ cls: "agent-composer" });
+    this.inputEl = composer.createEl("textarea", { attr: { rows: "4", placeholder: "Что сделать с заметкой" } });
+    const bar = composer.createDiv({ cls: "agent-composer-bar" });
+    this.modelEl = bar.createEl("select");
+    this.modelEl.addEventListener("change", () => {
+      const provider = this.plugin.activeProvider();
+      const value = this.modelEl?.value.trim() ?? "";
+      if (!provider || !value) return;
+      provider.model = value;
+      void this.plugin.saveSettings();
+    });
+    this.focusEl = bar.createEl("select");
+    this.focusEl.addEventListener("change", () => {
+      const value = this.focusEl?.value ?? "";
+      if (!value) return;
+      void this.plugin.setFocus(value, false);
+    });
+    this.providerEl = bar.createEl("select");
     this.providerEl.addEventListener("change", () => {
       if (!this.providerEl) return;
       this.plugin.settings.activeId = this.providerEl.value;
@@ -391,36 +445,8 @@ class AgentView extends ItemView {
       this.syncModelSelect();
       void this.loadChatModels();
     });
-    this.modelEl = root.createEl("select", { cls: "agent-provider" });
-    this.modelEl.addEventListener("change", () => {
-      const provider = this.plugin.activeProvider();
-      const value = this.modelEl?.value.trim() ?? "";
-      if (!provider || !value) return;
-      provider.model = value;
-      void this.plugin.saveSettings();
-    });
-    const focusRow = root.createDiv({ cls: "agent-focus-row" });
-    this.focusEl = focusRow.createEl("select");
-    this.focusEl.addEventListener("change", () => {
-      const value = this.focusEl?.value ?? "";
-      if (!value) return;
-      void this.plugin.setFocus(value, false);
-    });
-    focusRow.createEl("button", { text: "открытая" }).addEventListener("click", () => void this.plugin.focusOpenNote());
-    this.chatEl = root.createEl("select", { cls: "agent-provider" });
-    this.chatEl.addEventListener("change", () => {
-      const value = this.chatEl?.value ?? "";
-      if (!value) return;
-      void this.plugin.openSession(value);
-    });
-    const chatRow = root.createDiv({ cls: "agent-row" });
-    chatRow.createEl("button", { text: "новый чат" }).addEventListener("click", () => void this.plugin.newChat());
-    chatRow.createEl("button", { text: "убрать" }).addEventListener("click", () => void this.plugin.deleteSession());
-    this.noteEl = root.createDiv({ cls: "agent-tool" });
-    this.logEl = root.createDiv({ cls: "agent-log" });
-    this.inputEl = root.createEl("textarea", { attr: { rows: "4", placeholder: "Что сделать с заметкой" } });
-    const row = root.createDiv({ cls: "agent-row" });
-    this.sendEl = row.createEl("button", { text: "отправить" });
+    iconButton(bar, "crosshair", "открытая заметка").addEventListener("click", () => void this.plugin.focusOpenNote());
+    this.sendEl = iconButton(bar, "arrow-up", "отправить");
     this.sendEl.addEventListener("click", () => this.onSend());
     this.paint();
   }
@@ -431,6 +457,13 @@ class AgentView extends ItemView {
 
   paint() {
     if (!this.logEl || !this.sendEl) return;
+    if (this.plugin.focusFollow) {
+      const path = this.plugin.openNotePath();
+      if (path && path !== this.plugin.focusPath) {
+        this.plugin.focusPath = path;
+        void this.plugin.saveSettings();
+      }
+    }
     this.syncProviderSelect();
     this.syncModelSelect();
     this.syncFocusSelect();
@@ -447,16 +480,19 @@ class AgentView extends ItemView {
     if (session) {
       for (const line of session.lines) {
         const entry = this.logEl.createDiv({ cls: "agent-entry" });
-        entry.createDiv({ cls: "agent-line agent-" + line.kind, text: line.text });
+        const row = entry.createDiv({ cls: "agent-line-row" });
+        row.createDiv({ cls: "agent-line agent-" + line.kind, text: line.text });
         if ((line.kind === "user" || line.kind === "assistant") && line.text) {
-          const copy = entry.createEl("button", { text: "копировать" });
-          copy.addEventListener("click", () => void copyLine(line.text));
+          iconButton(row, "copy", "копировать").addEventListener("click", () => void copyLine(line.text));
         }
       }
     }
     if (this.plugin.running) this.logEl.createDiv({ cls: "agent-spin", attr: { "aria-label": "агент работает" } });
     this.logEl.scrollTop = this.logEl.scrollHeight;
-    this.sendEl.setText(this.plugin.running ? "стоп" : "отправить");
+    const sending = this.plugin.running;
+    setIcon(this.sendEl, sending ? "square" : "arrow-up");
+    this.sendEl.ariaLabel = sending ? "стоп" : "отправить";
+    this.sendEl.title = sending ? "стоп" : "отправить";
   }
 
   private onSend() {
@@ -474,14 +510,15 @@ class AgentView extends ItemView {
     const select = this.providerEl;
     if (!select) return;
     const providers = this.plugin.settings.providers;
-    const signature = providers.map((item) => item.id + "\0" + item.name).join("\n");
+    const signature = providers.map((item) => item.id + "\0" + item.name + "\0" + item.base).join("\n");
     if (this.providerSignature !== signature) {
       while (select.options.length > 0) select.remove(0);
       const known = providers.some((item) => item.id === this.plugin.settings.activeId);
       if (!known) select.add(new Option(providers.length === 0 ? "нет провайдера" : "выбери провайдера", ""));
-      for (const item of providers) select.add(new Option(item.name || item.id, item.id));
+      for (const item of providers) select.add(new Option(providerLabel(item), item.id));
       this.providerSignature = signature;
     }
+    select.hidden = providers.length < 2;
     const wanted = providers.some((item) => item.id === this.plugin.settings.activeId) ? this.plugin.settings.activeId : "";
     if (select.value !== wanted) select.value = wanted;
   }
@@ -496,7 +533,7 @@ class AgentView extends ItemView {
     if (this.focusSignature !== signature) {
       while (select.options.length > 0) select.remove(0);
       if (!focus) select.add(new Option("выбери файл", ""));
-      for (const path of notes) select.add(new Option(path, path));
+      for (const path of notes) select.add(new Option(fileLabel(path, notes), path));
       this.focusSignature = signature;
     }
     const wanted = focus && Array.from(select.options).some((option) => option.value === focus) ? focus : "";
@@ -525,7 +562,7 @@ class AgentView extends ItemView {
     const provider = this.plugin.activeProvider();
     const ids = provider && this.modelState?.providerId === provider.id && "ids" in this.modelState ? this.modelState.ids : [];
     const current = provider?.model.trim() ?? "";
-    const placeholder = !provider ? "выбери провайдера" : !current && ids.length === 0 ? "нет списка моделей" : !current ? "выбери модель" : "";
+    const placeholder = !provider ? "нет модели" : !current && ids.length === 0 ? "нет списка моделей" : !current ? "модель" : "";
     const signature = (provider?.id ?? "") + "\0" + placeholder + "\0" + current + "\0" + ids.join("\n");
     if (this.modelSignature !== signature) {
       while (select.options.length > 0) select.remove(0);

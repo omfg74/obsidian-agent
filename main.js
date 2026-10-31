@@ -158,6 +158,20 @@ function freshSettings() {
     maxSteps: 8
   };
 }
+function providerLabel(provider) {
+  const name = provider.name.trim();
+  const generic = name === "" || name === "\u043E\u0441\u043D\u043E\u0432\u043D\u043E\u0439" || name === "OpenAI" || /^провайдер \d+$/.test(name);
+  let host = "";
+  try {
+    host = new URL(provider.base).host;
+  } catch (e) {
+    host = "";
+  }
+  if (generic && host) return host;
+  if (name) return name;
+  if (host) return host;
+  return provider.id;
+}
 function newProviderId() {
   if (typeof crypto.randomUUID !== "function") throw new Error("\u043D\u0435\u0442 crypto.randomUUID");
   return crypto.randomUUID();
@@ -450,10 +464,23 @@ var AgentPlugin = class extends import_obsidian.Plugin {
     const view = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
     if (!(view == null ? void 0 : view.file)) return;
     this.lastNote = view.file.path;
-    if (!this.focusFollow || this.focusPath === view.file.path) return;
+    if (this.focusPath === view.file.path) return;
     this.focusPath = view.file.path;
+    this.focusFollow = true;
     void this.saveSettings();
     this.paint();
+  }
+  openNotePath() {
+    const active = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
+    if (active == null ? void 0 : active.file) return active.file.path;
+    const open = [];
+    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      const view = leaf.view;
+      if (view instanceof import_obsidian.MarkdownView && view.file) open.push(view.file.path);
+    }
+    if (this.lastNote && open.includes(this.lastNote)) return this.lastNote;
+    if (open.length === 1) return open[0];
+    return "";
   }
   async focusOpenNote() {
     var _a, _b, _c;
@@ -737,6 +764,16 @@ var AgentPlugin = class extends import_obsidian.Plugin {
     };
   }
 };
+function iconButton(parent, icon, label) {
+  const button = parent.createEl("button", { cls: "agent-icon", attr: { "aria-label": label, title: label } });
+  (0, import_obsidian.setIcon)(button, icon);
+  return button;
+}
+function fileLabel(path, paths) {
+  const base = path.split("/").pop() || path;
+  const same = paths.filter((item) => (item.split("/").pop() || item) === base);
+  return same.length > 1 ? path : base;
+}
 async function copyLine(text) {
   var _a;
   const write = (_a = navigator.clipboard) == null ? void 0 : _a.writeText;
@@ -786,16 +823,22 @@ var AgentView = class extends import_obsidian.ItemView {
     const root = this.contentEl;
     root.empty();
     root.addClass("agent-root");
-    this.providerEl = root.createEl("select", { cls: "agent-provider" });
-    this.providerEl.addEventListener("change", () => {
-      if (!this.providerEl) return;
-      this.plugin.settings.activeId = this.providerEl.value;
-      this.modelState = null;
-      void this.plugin.saveSettings();
-      this.syncModelSelect();
-      void this.loadChatModels();
+    const tools = root.createDiv({ cls: "agent-tools" });
+    this.chatEl = tools.createEl("select");
+    this.chatEl.addEventListener("change", () => {
+      var _a, _b;
+      const value = (_b = (_a = this.chatEl) == null ? void 0 : _a.value) != null ? _b : "";
+      if (!value) return;
+      void this.plugin.openSession(value);
     });
-    this.modelEl = root.createEl("select", { cls: "agent-provider" });
+    iconButton(tools, "plus", "\u043D\u043E\u0432\u044B\u0439 \u0447\u0430\u0442").addEventListener("click", () => void this.plugin.newChat());
+    iconButton(tools, "trash", "\u0443\u0431\u0440\u0430\u0442\u044C \u0447\u0430\u0442").addEventListener("click", () => void this.plugin.deleteSession());
+    this.noteEl = root.createDiv({ cls: "agent-tool" });
+    this.logEl = root.createDiv({ cls: "agent-log" });
+    const composer = root.createDiv({ cls: "agent-composer" });
+    this.inputEl = composer.createEl("textarea", { attr: { rows: "4", placeholder: "\u0427\u0442\u043E \u0441\u0434\u0435\u043B\u0430\u0442\u044C \u0441 \u0437\u0430\u043C\u0435\u0442\u043A\u043E\u0439" } });
+    const bar = composer.createDiv({ cls: "agent-composer-bar" });
+    this.modelEl = bar.createEl("select");
     this.modelEl.addEventListener("change", () => {
       var _a, _b;
       const provider = this.plugin.activeProvider();
@@ -804,30 +847,24 @@ var AgentView = class extends import_obsidian.ItemView {
       provider.model = value;
       void this.plugin.saveSettings();
     });
-    const focusRow = root.createDiv({ cls: "agent-focus-row" });
-    this.focusEl = focusRow.createEl("select");
+    this.focusEl = bar.createEl("select");
     this.focusEl.addEventListener("change", () => {
       var _a, _b;
       const value = (_b = (_a = this.focusEl) == null ? void 0 : _a.value) != null ? _b : "";
       if (!value) return;
       void this.plugin.setFocus(value, false);
     });
-    focusRow.createEl("button", { text: "\u043E\u0442\u043A\u0440\u044B\u0442\u0430\u044F" }).addEventListener("click", () => void this.plugin.focusOpenNote());
-    this.chatEl = root.createEl("select", { cls: "agent-provider" });
-    this.chatEl.addEventListener("change", () => {
-      var _a, _b;
-      const value = (_b = (_a = this.chatEl) == null ? void 0 : _a.value) != null ? _b : "";
-      if (!value) return;
-      void this.plugin.openSession(value);
+    this.providerEl = bar.createEl("select");
+    this.providerEl.addEventListener("change", () => {
+      if (!this.providerEl) return;
+      this.plugin.settings.activeId = this.providerEl.value;
+      this.modelState = null;
+      void this.plugin.saveSettings();
+      this.syncModelSelect();
+      void this.loadChatModels();
     });
-    const chatRow = root.createDiv({ cls: "agent-row" });
-    chatRow.createEl("button", { text: "\u043D\u043E\u0432\u044B\u0439 \u0447\u0430\u0442" }).addEventListener("click", () => void this.plugin.newChat());
-    chatRow.createEl("button", { text: "\u0443\u0431\u0440\u0430\u0442\u044C" }).addEventListener("click", () => void this.plugin.deleteSession());
-    this.noteEl = root.createDiv({ cls: "agent-tool" });
-    this.logEl = root.createDiv({ cls: "agent-log" });
-    this.inputEl = root.createEl("textarea", { attr: { rows: "4", placeholder: "\u0427\u0442\u043E \u0441\u0434\u0435\u043B\u0430\u0442\u044C \u0441 \u0437\u0430\u043C\u0435\u0442\u043A\u043E\u0439" } });
-    const row = root.createDiv({ cls: "agent-row" });
-    this.sendEl = row.createEl("button", { text: "\u043E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C" });
+    iconButton(bar, "crosshair", "\u043E\u0442\u043A\u0440\u044B\u0442\u0430\u044F \u0437\u0430\u043C\u0435\u0442\u043A\u0430").addEventListener("click", () => void this.plugin.focusOpenNote());
+    this.sendEl = iconButton(bar, "arrow-up", "\u043E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C");
     this.sendEl.addEventListener("click", () => this.onSend());
     this.paint();
   }
@@ -837,6 +874,13 @@ var AgentView = class extends import_obsidian.ItemView {
   paint() {
     var _a;
     if (!this.logEl || !this.sendEl) return;
+    if (this.plugin.focusFollow) {
+      const path = this.plugin.openNotePath();
+      if (path && path !== this.plugin.focusPath) {
+        this.plugin.focusPath = path;
+        void this.plugin.saveSettings();
+      }
+    }
     this.syncProviderSelect();
     this.syncModelSelect();
     this.syncFocusSelect();
@@ -853,16 +897,19 @@ var AgentView = class extends import_obsidian.ItemView {
     if (session) {
       for (const line of session.lines) {
         const entry = this.logEl.createDiv({ cls: "agent-entry" });
-        entry.createDiv({ cls: "agent-line agent-" + line.kind, text: line.text });
+        const row = entry.createDiv({ cls: "agent-line-row" });
+        row.createDiv({ cls: "agent-line agent-" + line.kind, text: line.text });
         if ((line.kind === "user" || line.kind === "assistant") && line.text) {
-          const copy = entry.createEl("button", { text: "\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C" });
-          copy.addEventListener("click", () => void copyLine(line.text));
+          iconButton(row, "copy", "\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C").addEventListener("click", () => void copyLine(line.text));
         }
       }
     }
     if (this.plugin.running) this.logEl.createDiv({ cls: "agent-spin", attr: { "aria-label": "\u0430\u0433\u0435\u043D\u0442 \u0440\u0430\u0431\u043E\u0442\u0430\u0435\u0442" } });
     this.logEl.scrollTop = this.logEl.scrollHeight;
-    this.sendEl.setText(this.plugin.running ? "\u0441\u0442\u043E\u043F" : "\u043E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C");
+    const sending = this.plugin.running;
+    (0, import_obsidian.setIcon)(this.sendEl, sending ? "square" : "arrow-up");
+    this.sendEl.ariaLabel = sending ? "\u0441\u0442\u043E\u043F" : "\u043E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C";
+    this.sendEl.title = sending ? "\u0441\u0442\u043E\u043F" : "\u043E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C";
   }
   onSend() {
     var _a, _b;
@@ -879,14 +926,15 @@ var AgentView = class extends import_obsidian.ItemView {
     const select = this.providerEl;
     if (!select) return;
     const providers = this.plugin.settings.providers;
-    const signature = providers.map((item) => item.id + "\0" + item.name).join("\n");
+    const signature = providers.map((item) => item.id + "\0" + item.name + "\0" + item.base).join("\n");
     if (this.providerSignature !== signature) {
       while (select.options.length > 0) select.remove(0);
       const known = providers.some((item) => item.id === this.plugin.settings.activeId);
       if (!known) select.add(new Option(providers.length === 0 ? "\u043D\u0435\u0442 \u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440\u0430" : "\u0432\u044B\u0431\u0435\u0440\u0438 \u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440\u0430", ""));
-      for (const item of providers) select.add(new Option(item.name || item.id, item.id));
+      for (const item of providers) select.add(new Option(providerLabel(item), item.id));
       this.providerSignature = signature;
     }
+    select.hidden = providers.length < 2;
     const wanted = providers.some((item) => item.id === this.plugin.settings.activeId) ? this.plugin.settings.activeId : "";
     if (select.value !== wanted) select.value = wanted;
   }
@@ -900,7 +948,7 @@ var AgentView = class extends import_obsidian.ItemView {
     if (this.focusSignature !== signature) {
       while (select.options.length > 0) select.remove(0);
       if (!focus) select.add(new Option("\u0432\u044B\u0431\u0435\u0440\u0438 \u0444\u0430\u0439\u043B", ""));
-      for (const path of notes) select.add(new Option(path, path));
+      for (const path of notes) select.add(new Option(fileLabel(path, notes), path));
       this.focusSignature = signature;
     }
     const wanted = focus && Array.from(select.options).some((option) => option.value === focus) ? focus : "";
@@ -928,7 +976,7 @@ var AgentView = class extends import_obsidian.ItemView {
     const provider = this.plugin.activeProvider();
     const ids = provider && ((_a = this.modelState) == null ? void 0 : _a.providerId) === provider.id && "ids" in this.modelState ? this.modelState.ids : [];
     const current = (_b = provider == null ? void 0 : provider.model.trim()) != null ? _b : "";
-    const placeholder = !provider ? "\u0432\u044B\u0431\u0435\u0440\u0438 \u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440\u0430" : !current && ids.length === 0 ? "\u043D\u0435\u0442 \u0441\u043F\u0438\u0441\u043A\u0430 \u043C\u043E\u0434\u0435\u043B\u0435\u0439" : !current ? "\u0432\u044B\u0431\u0435\u0440\u0438 \u043C\u043E\u0434\u0435\u043B\u044C" : "";
+    const placeholder = !provider ? "\u043D\u0435\u0442 \u043C\u043E\u0434\u0435\u043B\u0438" : !current && ids.length === 0 ? "\u043D\u0435\u0442 \u0441\u043F\u0438\u0441\u043A\u0430 \u043C\u043E\u0434\u0435\u043B\u0435\u0439" : !current ? "\u043C\u043E\u0434\u0435\u043B\u044C" : "";
     const signature = ((_c = provider == null ? void 0 : provider.id) != null ? _c : "") + "\0" + placeholder + "\0" + current + "\0" + ids.join("\n");
     if (this.modelSignature !== signature) {
       while (select.options.length > 0) select.remove(0);

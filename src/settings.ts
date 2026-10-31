@@ -20,6 +20,21 @@ export function freshSettings(): AgentSettings {
   };
 }
 
+export function providerLabel(provider: Provider): string {
+  const name = provider.name.trim();
+  const generic = name === "" || name === "основной" || name === "OpenAI" || /^провайдер \d+$/.test(name);
+  let host = "";
+  try {
+    host = new URL(provider.base).host;
+  } catch {
+    host = "";
+  }
+  if (generic && host) return host;
+  if (name) return name;
+  if (host) return host;
+  return provider.id;
+}
+
 export function newProviderId(): string {
   if (typeof crypto.randomUUID !== "function") throw new Error("нет crypto.randomUUID");
   return crypto.randomUUID();

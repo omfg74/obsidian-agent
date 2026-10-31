@@ -6,38 +6,49 @@
   padding: 8px;
 }
 
+.agent-tools {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.agent-tools select {
+  flex: 1;
+  min-width: 0;
+}
+
 .agent-log {
   flex: 1;
   overflow: auto;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
 }
 
 .agent-entry {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 4px;
   min-width: 0;
   max-width: 100%;
 }
 
-.agent-entry button {
-  align-self: flex-start;
-  font-size: 0.85em;
+.agent-line-row {
+  display: flex;
+  gap: 4px;
+  align-items: flex-start;
+  min-width: 0;
 }
 
 .agent-line {
+  flex: 1;
+  min-width: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  max-width: 100%;
 }
 
-.agent-user {
-  color: var(--text-normal);
-}
-
+.agent-user,
 .agent-assistant {
   color: var(--text-normal);
 }
@@ -65,31 +76,46 @@
   to { transform: rotate(360deg); }
 }
 
-.agent-provider {
-  width: 100%;
+.agent-icon {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.agent-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.agent-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 6px;
 }
 
 .agent-root textarea {
   width: 100%;
   box-sizing: border-box;
   resize: vertical;
+  border: none;
+  padding: 4px;
 }
 
-.agent-focus-row {
+.agent-composer-bar {
   display: flex;
-  gap: 8px;
+  gap: 6px;
+  align-items: center;
 }
 
-.agent-focus-row select {
+.agent-composer-bar select {
   flex: 1;
   min-width: 0;
-}
-
-.agent-row {
-  display: flex;
-  gap: 8px;
-}
-
-.agent-row button {
-  flex: 1;
+  font-size: 0.85em;
 }

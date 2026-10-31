@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { settingsFromSaved } from "./settings.ts";
+import { providerLabel, settingsFromSaved } from "./settings.ts";
+
+test("служебное имя провайдера показывается как адрес", () => {
+  assert.equal(providerLabel({ id: "saved", name: "основной", base: "https://api.openai.com/v1", key: "", model: "" }), "api.openai.com");
+  assert.equal(providerLabel({ id: "a", name: "домашний", base: "https://api.openai.com/v1", key: "", model: "" }), "домашний");
+});
 
 test("старые настройки становятся одним провайдером", () => {
   const settings = settingsFromSaved({ base: "https://api.example/v1", key: "secret", model: "gpt-4o", maxSteps: 4 });
