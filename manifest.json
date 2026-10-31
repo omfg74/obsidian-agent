@@ -1,0 +1,9 @@
+{
+  "id": "obsidian-agent",
+  "name": "Агент",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Читает заметки и картинки хранилища и правит текст через OpenAI-совместимый API.",
+  "author": "omfg",
+  "isDesktopOnly": false
+}

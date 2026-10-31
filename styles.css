@@ -1,0 +1,52 @@
+.agent-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 8px;
+  padding: 8px;
+}
+
+.agent-log {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agent-line {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.agent-user {
+  color: var(--text-normal);
+}
+
+.agent-assistant {
+  color: var(--text-normal);
+}
+
+.agent-tool {
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+
+.agent-error {
+  color: var(--text-error);
+}
+
+.agent-root textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+}
+
+.agent-row {
+  display: flex;
+  gap: 8px;
+}
+
+.agent-row button {
+  flex: 1;
+}
