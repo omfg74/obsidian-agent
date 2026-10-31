@@ -347,12 +347,6 @@ function iconButton(parent: HTMLElement, icon: string, label: string): HTMLButto
   return button;
 }
 
-function fileLabel(path: string, paths: string[]): string {
-  const base = path.split("/").pop() || path;
-  const same = paths.filter((item) => (item.split("/").pop() || item) === base);
-  return same.length > 1 ? path : base;
-}
-
 async function copyLine(text: string) {
   const write = navigator.clipboard?.writeText;
   if (typeof write !== "function") {
@@ -378,8 +372,8 @@ class AgentView extends ItemView {
   providerSignature = "";
   modelEl: HTMLSelectElement | null = null;
   modelSignature = "";
-  focusEl: HTMLSelectElement | null = null;
-  focusSignature = "";
+  chipEl: HTMLElement | null = null;
+  chipLabel: HTMLElement | null = null;
   modelState: { providerId: string; ids: string[] } | { providerId: string; error: string } | null = null;
   modelLoading = "";
   chatEl: HTMLSelectElement | null = null;
@@ -408,21 +402,27 @@ class AgentView extends ItemView {
     const root = this.contentEl;
     root.empty();
     root.addClass("agent-root");
-    const tools = root.createDiv({ cls: "agent-tools" });
-    this.chatEl = tools.createEl("select");
+    this.noteEl = root.createDiv({ cls: "agent-note" });
+    this.logEl = root.createDiv({ cls: "agent-log" });
+    const chatRow = root.createDiv({ cls: "agent-chatbar" });
+    this.chatEl = chatRow.createEl("select");
     this.chatEl.addEventListener("change", () => {
       const value = this.chatEl?.value ?? "";
       if (!value) return;
       void this.plugin.openSession(value);
     });
-    iconButton(tools, "plus", "новый чат").addEventListener("click", () => void this.plugin.newChat());
-    iconButton(tools, "trash", "убрать чат").addEventListener("click", () => void this.plugin.deleteSession());
-    this.noteEl = root.createDiv({ cls: "agent-tool" });
-    this.logEl = root.createDiv({ cls: "agent-log" });
+    iconButton(chatRow, "plus", "новый чат").addEventListener("click", () => void this.plugin.newChat());
+    iconButton(chatRow, "trash", "убрать чат").addEventListener("click", () => void this.plugin.deleteSession());
     const composer = root.createDiv({ cls: "agent-composer" });
-    this.inputEl = composer.createEl("textarea", { attr: { rows: "4", placeholder: "Что сделать с заметкой" } });
+    const chips = composer.createDiv({ cls: "agent-chips" });
+    this.chipEl = chips.createDiv({ cls: "agent-chip" });
+    this.chipLabel = this.chipEl.createSpan();
+    const closeChip = iconButton(this.chipEl, "x", "убрать файл");
+    closeChip.addEventListener("click", () => void this.plugin.setFocus("", false));
+    this.inputEl = composer.createEl("textarea", { attr: { rows: "3", placeholder: "Задание для заметки в фокусе" } });
     const bar = composer.createDiv({ cls: "agent-composer-bar" });
-    this.modelEl = bar.createEl("select");
+    iconButton(bar, "at-sign", "текущий файл").addEventListener("click", () => void this.plugin.focusOpenNote());
+    this.modelEl = bar.createEl("select", { cls: "agent-model" });
     this.modelEl.addEventListener("change", () => {
       const provider = this.plugin.activeProvider();
       const value = this.modelEl?.value.trim() ?? "";
@@ -430,13 +430,7 @@ class AgentView extends ItemView {
       provider.model = value;
       void this.plugin.saveSettings();
     });
-    this.focusEl = bar.createEl("select");
-    this.focusEl.addEventListener("change", () => {
-      const value = this.focusEl?.value ?? "";
-      if (!value) return;
-      void this.plugin.setFocus(value, false);
-    });
-    this.providerEl = bar.createEl("select");
+    this.providerEl = bar.createEl("select", { cls: "agent-model" });
     this.providerEl.addEventListener("change", () => {
       if (!this.providerEl) return;
       this.plugin.settings.activeId = this.providerEl.value;
@@ -445,8 +439,8 @@ class AgentView extends ItemView {
       this.syncModelSelect();
       void this.loadChatModels();
     });
-    iconButton(bar, "crosshair", "открытая заметка").addEventListener("click", () => void this.plugin.focusOpenNote());
     this.sendEl = iconButton(bar, "arrow-up", "отправить");
+    this.sendEl.classList.add("agent-send");
     this.sendEl.addEventListener("click", () => this.onSend());
     this.paint();
   }
@@ -466,7 +460,7 @@ class AgentView extends ItemView {
     }
     this.syncProviderSelect();
     this.syncModelSelect();
-    this.syncFocusSelect();
+    this.syncChip();
     this.syncChatSelect();
     const provider = this.plugin.activeProvider();
     const listed = this.modelState?.providerId === provider?.id;
@@ -480,10 +474,10 @@ class AgentView extends ItemView {
     if (session) {
       for (const line of session.lines) {
         const entry = this.logEl.createDiv({ cls: "agent-entry" });
-        const row = entry.createDiv({ cls: "agent-line-row" });
-        row.createDiv({ cls: "agent-line agent-" + line.kind, text: line.text });
+        entry.createDiv({ cls: "agent-line agent-" + line.kind, text: line.text });
         if ((line.kind === "user" || line.kind === "assistant") && line.text) {
-          iconButton(row, "copy", "копировать").addEventListener("click", () => void copyLine(line.text));
+          const actions = entry.createDiv({ cls: "agent-actions" });
+          iconButton(actions, "copy", "копировать").addEventListener("click", () => void copyLine(line.text));
         }
       }
     }
@@ -523,21 +517,14 @@ class AgentView extends ItemView {
     if (select.value !== wanted) select.value = wanted;
   }
 
-  private syncFocusSelect() {
-    const select = this.focusEl;
-    if (!select) return;
-    const notes = this.plugin.app.vault.getMarkdownFiles().map((file) => file.path).sort((a, b) => a.localeCompare(b));
+  private syncChip() {
+    if (!this.chipEl || !this.chipLabel) return;
     const focus = this.plugin.focusPath.trim();
-    if (focus && !notes.includes(focus)) notes.unshift(focus);
-    const signature = focus + "\0" + notes.join("\n");
-    if (this.focusSignature !== signature) {
-      while (select.options.length > 0) select.remove(0);
-      if (!focus) select.add(new Option("выбери файл", ""));
-      for (const path of notes) select.add(new Option(fileLabel(path, notes), path));
-      this.focusSignature = signature;
-    }
-    const wanted = focus && Array.from(select.options).some((option) => option.value === focus) ? focus : "";
-    if (select.value !== wanted) select.value = wanted;
+    this.chipEl.hidden = !focus;
+    if (!focus) return;
+    const name = focus.split("/").pop() || focus;
+    const current = this.plugin.openNotePath() === focus ? " · текущий" : "";
+    this.chipLabel.setText(name + current);
   }
 
   private syncChatSelect() {
