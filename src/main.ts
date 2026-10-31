@@ -12,6 +12,8 @@ export default class AgentPlugin extends Plugin {
   sessions: Session[] = [];
   sessionId = "";
   lastNote = "";
+  focusPath = "";
+  focusFollow = true;
   running = false;
   stop = false;
   view: AgentView | null = null;
@@ -29,7 +31,38 @@ export default class AgentPlugin extends Plugin {
 
   private rememberNote() {
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-    if (view?.file) this.lastNote = view.file.path;
+    if (!view?.file) return;
+    this.lastNote = view.file.path;
+    if (!this.focusFollow || this.focusPath === view.file.path) return;
+    this.focusPath = view.file.path;
+    void this.saveSettings();
+    this.paint();
+  }
+
+  async focusOpenNote() {
+    this.rememberNote();
+    let path = this.markdownView()?.file?.path ?? "";
+    if (!path) {
+      for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+        const view = leaf.view;
+        if (view instanceof MarkdownView && view.file) {
+          path = view.file.path;
+          break;
+        }
+      }
+    }
+    if (!path) {
+      new Notice("нет открытой заметки");
+      return;
+    }
+    await this.setFocus(path, true);
+  }
+
+  async setFocus(path: string, follow: boolean) {
+    this.focusPath = path;
+    this.focusFollow = follow;
+    await this.saveSettings();
+    this.paint();
   }
 
   private markdownView(): MarkdownView | null {
@@ -54,6 +87,11 @@ export default class AgentPlugin extends Plugin {
     } else {
       this.sessions = chats.sessions;
       this.sessionId = chats.sessionId;
+    }
+    if (saved && typeof saved === "object") {
+      const data = saved as Record<string, unknown>;
+      if (typeof data.focusPath === "string") this.focusPath = data.focusPath;
+      if (typeof data.focusFollow === "boolean") this.focusFollow = data.focusFollow;
     }
     const migrate = !saved || typeof saved !== "object" || !("providers" in saved) || !("sessions" in saved);
     if (saved && typeof saved === "object" && migrate) await this.saveSettings();
@@ -135,7 +173,7 @@ export default class AgentPlugin extends Plugin {
       const stored = stripImages(session.history);
       return { ...session, history: stored.history, imagesOmitted: session.imagesOmitted || stored.imagesOmitted };
     });
-    await this.saveData({ ...this.settings, sessions, sessionId: this.sessionId });
+    await this.saveData({ ...this.settings, sessions, sessionId: this.sessionId, focusPath: this.focusPath, focusFollow: this.focusFollow });
   }
 
   async activate() {
@@ -184,9 +222,10 @@ export default class AgentPlugin extends Plugin {
       this.push({ kind: "error", text: "укажи адрес API и модель" });
       return;
     }
-    const active = this.activePath();
-    const selected = this.selection();
-    const where = active ? "Открытый файл: " + active : "Открытого файла нет.";
+    const active = this.focusPath.trim();
+    const view = this.markdownView();
+    const selected = view?.file?.path === active ? view.editor.getSelection() : "";
+    const where = active ? "Фокус: " + active : "Фокус не выбран.";
     const prompt = [where, selected ? "Выделение:\n" + selected : "", "Задание:\n" + task].filter(Boolean).join("\n\n");
     session.history.push({ role: "user", content: prompt });
     this.push({ kind: "user", text: task });
@@ -217,15 +256,6 @@ export default class AgentPlugin extends Plugin {
       this.paint();
       await this.saveSettings();
     }
-  }
-
-  private activePath(): string {
-    this.rememberNote();
-    return this.markdownView()?.file?.path ?? "";
-  }
-
-  private selection(): string {
-    return this.markdownView()?.editor.getSelection() ?? "";
   }
 
   private async post(base: string, key: string, model: string, messages: ChatMessage[]) {
@@ -322,6 +352,8 @@ class AgentView extends ItemView {
   providerSignature = "";
   modelEl: HTMLSelectElement | null = null;
   modelSignature = "";
+  focusEl: HTMLSelectElement | null = null;
+  focusSignature = "";
   modelState: { providerId: string; ids: string[] } | { providerId: string; error: string } | null = null;
   modelLoading = "";
   chatEl: HTMLSelectElement | null = null;
@@ -367,6 +399,14 @@ class AgentView extends ItemView {
       provider.model = value;
       void this.plugin.saveSettings();
     });
+    const focusRow = root.createDiv({ cls: "agent-focus-row" });
+    this.focusEl = focusRow.createEl("select");
+    this.focusEl.addEventListener("change", () => {
+      const value = this.focusEl?.value ?? "";
+      if (!value) return;
+      void this.plugin.setFocus(value, false);
+    });
+    focusRow.createEl("button", { text: "открытая" }).addEventListener("click", () => void this.plugin.focusOpenNote());
     this.chatEl = root.createEl("select", { cls: "agent-provider" });
     this.chatEl.addEventListener("change", () => {
       const value = this.chatEl?.value ?? "";
@@ -393,6 +433,7 @@ class AgentView extends ItemView {
     if (!this.logEl || !this.sendEl) return;
     this.syncProviderSelect();
     this.syncModelSelect();
+    this.syncFocusSelect();
     this.syncChatSelect();
     const provider = this.plugin.activeProvider();
     const listed = this.modelState?.providerId === provider?.id;
@@ -442,6 +483,23 @@ class AgentView extends ItemView {
       this.providerSignature = signature;
     }
     const wanted = providers.some((item) => item.id === this.plugin.settings.activeId) ? this.plugin.settings.activeId : "";
+    if (select.value !== wanted) select.value = wanted;
+  }
+
+  private syncFocusSelect() {
+    const select = this.focusEl;
+    if (!select) return;
+    const notes = this.plugin.app.vault.getMarkdownFiles().map((file) => file.path).sort((a, b) => a.localeCompare(b));
+    const focus = this.plugin.focusPath.trim();
+    if (focus && !notes.includes(focus)) notes.unshift(focus);
+    const signature = focus + "\0" + notes.join("\n");
+    if (this.focusSignature !== signature) {
+      while (select.options.length > 0) select.remove(0);
+      if (!focus) select.add(new Option("выбери файл", ""));
+      for (const path of notes) select.add(new Option(path, path));
+      this.focusSignature = signature;
+    }
+    const wanted = focus && Array.from(select.options).some((option) => option.value === focus) ? focus : "";
     if (select.value !== wanted) select.value = wanted;
   }
 

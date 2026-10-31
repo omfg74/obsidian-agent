@@ -6,7 +6,7 @@ import { dispatchTool, resolvePath, type VaultFs } from "./vault.ts";
 
 test("открытая заметка названа в подсказке", () => {
   const prompt = systemPrompt("уг.md");
-  assert.match(prompt, /Открыта заметка: уг\.md/);
+  assert.match(prompt, /Фокус: уг\.md/);
   assert.match(prompt, /другой файл не создавай/);
 });
 

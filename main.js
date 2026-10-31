@@ -96,7 +96,7 @@ var TOOLS = [
   }
 ];
 function systemPrompt(activePath) {
-  const where = activePath ? "\u041E\u0442\u043A\u0440\u044B\u0442\u0430 \u0437\u0430\u043C\u0435\u0442\u043A\u0430: " + activePath + ". \xAB\u042D\u0442\u043E\u0442 \u0444\u0430\u0439\u043B\xBB, \xAB\u044D\u0442\u0430 \u0437\u0430\u043C\u0435\u0442\u043A\u0430\xBB \u0438 \xAB\u0437\u0434\u0435\u0441\u044C\xBB \u2014 \u044D\u0442\u043E \u043E\u043D\u0430. \u0422\u0430\u043A\u043E\u0439 \u0437\u0430\u043F\u0440\u043E\u0441 \u043F\u0440\u0430\u0432\u044C \u0432 \u043D\u0435\u0439, \u0434\u0440\u0443\u0433\u043E\u0439 \u0444\u0430\u0439\u043B \u043D\u0435 \u0441\u043E\u0437\u0434\u0430\u0432\u0430\u0439." : "\u0417\u0430\u043C\u0435\u0442\u043A\u0430 \u043D\u0435 \u043E\u0442\u043A\u0440\u044B\u0442\u0430. \u041D\u0435 \u0432\u044B\u0434\u0443\u043C\u044B\u0432\u0430\u0439 \u043F\u0443\u0442\u044C \u043A \u0444\u0430\u0439\u043B\u0443.";
+  const where = activePath ? "\u0424\u043E\u043A\u0443\u0441: " + activePath + ". \xAB\u042D\u0442\u043E\u0442 \u0444\u0430\u0439\u043B\xBB, \xAB\u044D\u0442\u0430 \u0437\u0430\u043C\u0435\u0442\u043A\u0430\xBB \u0438 \xAB\u0437\u0434\u0435\u0441\u044C\xBB \u2014 \u044D\u0442\u043E \u043E\u043D. \u0422\u0430\u043A\u043E\u0439 \u0437\u0430\u043F\u0440\u043E\u0441 \u043F\u0440\u0430\u0432\u044C \u0432 \u043D\u0451\u043C, \u0434\u0440\u0443\u0433\u043E\u0439 \u0444\u0430\u0439\u043B \u043D\u0435 \u0441\u043E\u0437\u0434\u0430\u0432\u0430\u0439." : "\u0424\u043E\u043A\u0443\u0441 \u043D\u0435 \u0432\u044B\u0431\u0440\u0430\u043D. \u041D\u0435 \u0432\u044B\u0434\u0443\u043C\u044B\u0432\u0430\u0439 \u043F\u0443\u0442\u044C \u043A \u0444\u0430\u0439\u043B\u0443.";
   return [
     "\u0422\u044B \u0430\u0433\u0435\u043D\u0442 \u0432\u043D\u0443\u0442\u0440\u0438 Obsidian. \u0425\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435 \u0441\u043C\u043E\u0442\u0440\u0438 \u0442\u043E\u043B\u044C\u043A\u043E \u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442\u0430\u043C\u0438, \u043D\u0435 \u0432\u044B\u0434\u0443\u043C\u044B\u0432\u0430\u0439 \u0442\u0435\u043A\u0441\u0442 \u0444\u0430\u0439\u043B\u043E\u0432 \u0438 \u043A\u0430\u0440\u0442\u0438\u043D\u043E\u043A.",
     "\u041A\u0430\u0440\u0442\u0438\u043D\u043A\u0443 \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u043E\u0442\u043A\u0440\u043E\u0439 \u0447\u0435\u0440\u0435\u0437 view_image. \u041C\u0430\u043B\u0435\u043D\u044C\u043A\u0443\u044E \u043F\u0440\u0430\u0432\u043A\u0443 \u0434\u0435\u043B\u0430\u0439 \u0447\u0435\u0440\u0435\u0437 search_replace.",
@@ -430,6 +430,8 @@ var AgentPlugin = class extends import_obsidian.Plugin {
     this.sessions = [];
     this.sessionId = "";
     this.lastNote = "";
+    this.focusPath = "";
+    this.focusFollow = true;
     this.running = false;
     this.stop = false;
     this.view = null;
@@ -446,7 +448,37 @@ var AgentPlugin = class extends import_obsidian.Plugin {
   }
   rememberNote() {
     const view = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
-    if (view == null ? void 0 : view.file) this.lastNote = view.file.path;
+    if (!(view == null ? void 0 : view.file)) return;
+    this.lastNote = view.file.path;
+    if (!this.focusFollow || this.focusPath === view.file.path) return;
+    this.focusPath = view.file.path;
+    void this.saveSettings();
+    this.paint();
+  }
+  async focusOpenNote() {
+    var _a, _b, _c;
+    this.rememberNote();
+    let path = (_c = (_b = (_a = this.markdownView()) == null ? void 0 : _a.file) == null ? void 0 : _b.path) != null ? _c : "";
+    if (!path) {
+      for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+        const view = leaf.view;
+        if (view instanceof import_obsidian.MarkdownView && view.file) {
+          path = view.file.path;
+          break;
+        }
+      }
+    }
+    if (!path) {
+      new import_obsidian.Notice("\u043D\u0435\u0442 \u043E\u0442\u043A\u0440\u044B\u0442\u043E\u0439 \u0437\u0430\u043C\u0435\u0442\u043A\u0438");
+      return;
+    }
+    await this.setFocus(path, true);
+  }
+  async setFocus(path, follow) {
+    this.focusPath = path;
+    this.focusFollow = follow;
+    await this.saveSettings();
+    this.paint();
   }
   markdownView() {
     var _a;
@@ -470,6 +502,11 @@ var AgentPlugin = class extends import_obsidian.Plugin {
     } else {
       this.sessions = chats.sessions;
       this.sessionId = chats.sessionId;
+    }
+    if (saved && typeof saved === "object") {
+      const data = saved;
+      if (typeof data.focusPath === "string") this.focusPath = data.focusPath;
+      if (typeof data.focusFollow === "boolean") this.focusFollow = data.focusFollow;
     }
     const migrate = !saved || typeof saved !== "object" || !("providers" in saved) || !("sessions" in saved);
     if (saved && typeof saved === "object" && migrate) await this.saveSettings();
@@ -546,7 +583,7 @@ var AgentPlugin = class extends import_obsidian.Plugin {
       const stored = stripImages(session.history);
       return { ...session, history: stored.history, imagesOmitted: session.imagesOmitted || stored.imagesOmitted };
     });
-    await this.saveData({ ...this.settings, sessions, sessionId: this.sessionId });
+    await this.saveData({ ...this.settings, sessions, sessionId: this.sessionId, focusPath: this.focusPath, focusFollow: this.focusFollow });
   }
   async activate() {
     var _a;
@@ -571,6 +608,7 @@ var AgentPlugin = class extends import_obsidian.Plugin {
     this.paint();
   }
   async ask(task) {
+    var _a;
     if (this.running) return;
     const session = this.activeSession();
     if (!session) {
@@ -593,9 +631,10 @@ var AgentPlugin = class extends import_obsidian.Plugin {
       this.push({ kind: "error", text: "\u0443\u043A\u0430\u0436\u0438 \u0430\u0434\u0440\u0435\u0441 API \u0438 \u043C\u043E\u0434\u0435\u043B\u044C" });
       return;
     }
-    const active = this.activePath();
-    const selected = this.selection();
-    const where = active ? "\u041E\u0442\u043A\u0440\u044B\u0442\u044B\u0439 \u0444\u0430\u0439\u043B: " + active : "\u041E\u0442\u043A\u0440\u044B\u0442\u043E\u0433\u043E \u0444\u0430\u0439\u043B\u0430 \u043D\u0435\u0442.";
+    const active = this.focusPath.trim();
+    const view = this.markdownView();
+    const selected = ((_a = view == null ? void 0 : view.file) == null ? void 0 : _a.path) === active ? view.editor.getSelection() : "";
+    const where = active ? "\u0424\u043E\u043A\u0443\u0441: " + active : "\u0424\u043E\u043A\u0443\u0441 \u043D\u0435 \u0432\u044B\u0431\u0440\u0430\u043D.";
     const prompt = [where, selected ? "\u0412\u044B\u0434\u0435\u043B\u0435\u043D\u0438\u0435:\n" + selected : "", "\u0417\u0430\u0434\u0430\u043D\u0438\u0435:\n" + task].filter(Boolean).join("\n\n");
     session.history.push({ role: "user", content: prompt });
     this.push({ kind: "user", text: task });
@@ -626,15 +665,6 @@ var AgentPlugin = class extends import_obsidian.Plugin {
       this.paint();
       await this.saveSettings();
     }
-  }
-  activePath() {
-    var _a, _b, _c;
-    this.rememberNote();
-    return (_c = (_b = (_a = this.markdownView()) == null ? void 0 : _a.file) == null ? void 0 : _b.path) != null ? _c : "";
-  }
-  selection() {
-    var _a, _b;
-    return (_b = (_a = this.markdownView()) == null ? void 0 : _a.editor.getSelection()) != null ? _b : "";
   }
   async post(base, key, model, messages) {
     var _a, _b, _c;
@@ -733,6 +763,8 @@ var AgentView = class extends import_obsidian.ItemView {
     this.providerSignature = "";
     this.modelEl = null;
     this.modelSignature = "";
+    this.focusEl = null;
+    this.focusSignature = "";
     this.modelState = null;
     this.modelLoading = "";
     this.chatEl = null;
@@ -772,6 +804,15 @@ var AgentView = class extends import_obsidian.ItemView {
       provider.model = value;
       void this.plugin.saveSettings();
     });
+    const focusRow = root.createDiv({ cls: "agent-focus-row" });
+    this.focusEl = focusRow.createEl("select");
+    this.focusEl.addEventListener("change", () => {
+      var _a, _b;
+      const value = (_b = (_a = this.focusEl) == null ? void 0 : _a.value) != null ? _b : "";
+      if (!value) return;
+      void this.plugin.setFocus(value, false);
+    });
+    focusRow.createEl("button", { text: "\u043E\u0442\u043A\u0440\u044B\u0442\u0430\u044F" }).addEventListener("click", () => void this.plugin.focusOpenNote());
     this.chatEl = root.createEl("select", { cls: "agent-provider" });
     this.chatEl.addEventListener("change", () => {
       var _a, _b;
@@ -798,6 +839,7 @@ var AgentView = class extends import_obsidian.ItemView {
     if (!this.logEl || !this.sendEl) return;
     this.syncProviderSelect();
     this.syncModelSelect();
+    this.syncFocusSelect();
     this.syncChatSelect();
     const provider = this.plugin.activeProvider();
     const listed = ((_a = this.modelState) == null ? void 0 : _a.providerId) === (provider == null ? void 0 : provider.id);
@@ -846,6 +888,22 @@ var AgentView = class extends import_obsidian.ItemView {
       this.providerSignature = signature;
     }
     const wanted = providers.some((item) => item.id === this.plugin.settings.activeId) ? this.plugin.settings.activeId : "";
+    if (select.value !== wanted) select.value = wanted;
+  }
+  syncFocusSelect() {
+    const select = this.focusEl;
+    if (!select) return;
+    const notes = this.plugin.app.vault.getMarkdownFiles().map((file) => file.path).sort((a, b) => a.localeCompare(b));
+    const focus = this.plugin.focusPath.trim();
+    if (focus && !notes.includes(focus)) notes.unshift(focus);
+    const signature = focus + "\0" + notes.join("\n");
+    if (this.focusSignature !== signature) {
+      while (select.options.length > 0) select.remove(0);
+      if (!focus) select.add(new Option("\u0432\u044B\u0431\u0435\u0440\u0438 \u0444\u0430\u0439\u043B", ""));
+      for (const path of notes) select.add(new Option(path, path));
+      this.focusSignature = signature;
+    }
+    const wanted = focus && Array.from(select.options).some((option) => option.value === focus) ? focus : "";
     if (select.value !== wanted) select.value = wanted;
   }
   syncChatSelect() {

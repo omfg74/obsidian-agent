@@ -75,6 +75,16 @@
   resize: vertical;
 }
 
+.agent-focus-row {
+  display: flex;
+  gap: 8px;
+}
+
+.agent-focus-row select {
+  flex: 1;
+  min-width: 0;
+}
+
 .agent-row {
   display: flex;
   gap: 8px;
