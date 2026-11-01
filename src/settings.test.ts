@@ -131,6 +131,31 @@ test("сохранённый доступ и адрес моделей чита�
   }), /адресом моделей/);
 });
 
+test("таймаут провайдера читается в секундах, пустое поле не подменяется", () => {
+  const settings = settingsFromSaved({
+    activeId: "local",
+    providers: [{
+      id: "local",
+      name: "Локальная",
+      base: "http://192.168.1.10:11434/v1",
+      key: "",
+      model: "qwen",
+      timeout: 180,
+    }],
+  });
+  assert.equal(settings.providers[0].timeout, 180);
+  const plain = settingsFromSaved({
+    providers: [{ id: "a", name: "A", base: "https://example/v1", key: "", model: "" }],
+  });
+  assert.equal(plain.providers[0].timeout, undefined);
+  assert.throws(() => settingsFromSaved({
+    providers: [{ id: "a", name: "A", base: "https://example/v1", key: "", model: "", timeout: 0 }],
+  }), /таймаут/);
+  assert.throws(() => settingsFromSaved({
+    providers: [{ id: "a", name: "A", base: "https://example/v1", key: "", model: "", timeout: "180" }],
+  }), /таймаут/);
+});
+
 test("битый провайдер не превращается в рабочий", () => {
   assert.throws(() => settingsFromSaved({ providers: [{ id: "a" }] }), /повреждён|без /);
   assert.throws(() => settingsFromSaved({

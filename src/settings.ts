@@ -9,6 +9,8 @@ export interface Provider {
   /** Корень списка моделей, если это не base. */
   modelsBase?: string;
   preset?: string;
+  /** Секунды ожидания следующих данных. Нет поля — предел самого Obsidian. */
+  timeout?: number;
 }
 
 export interface ProviderPreset {
@@ -332,6 +334,12 @@ function readProvider(item: unknown): Provider {
   if ("preset" in row && row.preset !== undefined) {
     if (typeof row.preset !== "string" || !row.preset.trim()) throw new Error("провайдер с пустой преднастройкой");
     provider.preset = row.preset.trim();
+  }
+  if ("timeout" in row && row.timeout !== undefined) {
+    if (typeof row.timeout !== "number" || !Number.isInteger(row.timeout) || row.timeout < 1 || row.timeout > 3600) {
+      throw new Error("таймаут провайдера повреждён");
+    }
+    provider.timeout = row.timeout;
   }
   return provider;
 }

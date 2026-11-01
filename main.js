@@ -552,6 +552,12 @@ function readProvider(item) {
     if (typeof row.preset !== "string" || !row.preset.trim()) throw new Error("\u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440 \u0441 \u043F\u0443\u0441\u0442\u043E\u0439 \u043F\u0440\u0435\u0434\u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u043E\u0439");
     provider.preset = row.preset.trim();
   }
+  if ("timeout" in row && row.timeout !== void 0) {
+    if (typeof row.timeout !== "number" || !Number.isInteger(row.timeout) || row.timeout < 1 || row.timeout > 3600) {
+      throw new Error("\u0442\u0430\u0439\u043C\u0430\u0443\u0442 \u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440\u0430 \u043F\u043E\u0432\u0440\u0435\u0436\u0434\u0451\u043D");
+    }
+    provider.timeout = row.timeout;
+  }
   return provider;
 }
 
@@ -791,6 +797,79 @@ function modalityReadsImages(modality) {
   const parts = input.split("+").map((part) => part.trim()).filter(Boolean);
   if (parts.length === 0) return null;
   return parts.includes("image");
+}
+
+// src/http.ts
+function capacitorOptions(init, timeoutMs) {
+  const options = {
+    url: init.url,
+    method: init.method,
+    headers: init.headers,
+    responseType: "text",
+    readTimeout: timeoutMs,
+    connectTimeout: timeoutMs,
+    shouldEncodeUrlParams: false
+  };
+  if (init.body !== void 0) options.data = init.body;
+  return options;
+}
+function readHttpResult(status, data) {
+  if (typeof status !== "number" || !Number.isInteger(status)) throw new Error("\u043E\u0442\u0432\u0435\u0442 \u0431\u0435\u0437 \u043A\u043E\u0434\u0430");
+  if (typeof data === "string") return { status, text: data };
+  if (data && typeof data === "object") return { status, text: JSON.stringify(data) };
+  throw new Error("\u043F\u0443\u0441\u0442\u043E\u0439 \u043E\u0442\u0432\u0435\u0442");
+}
+function httpRoute(scope = globalThis) {
+  var _a;
+  const cap = capacitorFrom(scope);
+  if (!cap) return { kind: "obsidian" };
+  const platform = cap.getPlatform();
+  if (platform !== "ios" && platform !== "android") return { kind: "obsidian" };
+  if (cap.isPluginAvailable && !cap.isPluginAvailable("CapacitorHttp")) return { kind: "unavailable" };
+  const http = (_a = cap.Plugins) == null ? void 0 : _a.CapacitorHttp;
+  if (!http || typeof http.request !== "function") return { kind: "unavailable" };
+  return { kind: "capacitor", request: http };
+}
+function withDeadline(pending, timeoutMs, label) {
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(label)), timeoutMs);
+  });
+  pending.catch(() => void 0);
+  return Promise.race([pending, deadline]).finally(() => {
+    if (timer !== void 0) clearTimeout(timer);
+  });
+}
+function capacitorFrom(scope) {
+  if (!("Capacitor" in scope)) return void 0;
+  const value = scope.Capacitor;
+  if (!value || typeof value !== "object") return void 0;
+  if (!("getPlatform" in value) || typeof value.getPlatform !== "function") return void 0;
+  const getPlatform = value.getPlatform;
+  const isPluginAvailable = "isPluginAvailable" in value && typeof value.isPluginAvailable === "function" ? value.isPluginAvailable : void 0;
+  const plugins = "Plugins" in value ? value.Plugins : void 0;
+  const http = plugins && typeof plugins === "object" && "CapacitorHttp" in plugins ? plugins.CapacitorHttp : void 0;
+  const plugin = httpPlugin(http);
+  return {
+    getPlatform: () => {
+      const platform = Reflect.apply(getPlatform, value, []);
+      if (typeof platform !== "string") throw new Error("\u043F\u043B\u0430\u0442\u0444\u043E\u0440\u043C\u0430 Capacitor \u0431\u0435\u0437 \u0438\u043C\u0435\u043D\u0438");
+      return platform;
+    },
+    isPluginAvailable: isPluginAvailable ? (name) => {
+      const available = Reflect.apply(isPluginAvailable, value, [name]);
+      if (typeof available !== "boolean") throw new Error("CapacitorHttp: \u043E\u0442\u0432\u0435\u0442 isPluginAvailable \u043D\u0435 boolean");
+      return available;
+    } : void 0,
+    Plugins: plugin ? { CapacitorHttp: plugin } : void 0
+  };
+}
+function httpPlugin(value) {
+  if (!value || typeof value !== "object" || !("request" in value) || typeof value.request !== "function") return void 0;
+  const request = value.request;
+  return {
+    request: (options) => Reflect.apply(request, value, [options])
+  };
 }
 
 // src/replace.ts
@@ -1044,17 +1123,16 @@ var AgentPlugin = class extends import_obsidian.Plugin {
     return (_a = this.settings.providers.find((item) => item.id === this.settings.activeId)) != null ? _a : null;
   }
   async fetchModels(provider) {
-    const res = await (0, import_obsidian.requestUrl)({
+    const res = await this.callApi(provider, {
       url: modelsEndpoint(provider),
       method: "GET",
-      headers: requestHeaders(provider, false),
-      throw: false
+      headers: requestHeaders(provider, false)
     });
     if (res.status < 200 || res.status >= 300) {
-      const body = (res.text || "").slice(0, 500);
+      const body = res.text.slice(0, 500);
       throw new Error("\u0441\u043F\u0438\u0441\u043E\u043A \u043C\u043E\u0434\u0435\u043B\u0435\u0439 \u043E\u0442\u0432\u0435\u0442\u0438\u043B " + res.status + (body ? ": " + body : ""));
     }
-    return listedModels(res.json);
+    return listedModels(JSON.parse(res.text));
   }
   async saveSettings() {
     const sessions = this.sessions.map((session) => {
@@ -1144,18 +1222,37 @@ var AgentPlugin = class extends import_obsidian.Plugin {
     }
   }
   async post(provider, model, messages) {
-    const res = await (0, import_obsidian.requestUrl)({
+    const res = await this.callApi(provider, {
       url: chatCompletionsUrl(provider),
       method: "POST",
       headers: requestHeaders(provider, true),
-      body: JSON.stringify({ model, messages, tools: TOOLS, stream: true }),
-      throw: false
+      body: JSON.stringify({ model, messages, tools: TOOLS, stream: true })
     });
     if (res.status < 200 || res.status >= 300) {
-      const body = (res.text || "").slice(0, 500);
+      const body = res.text.slice(0, 500);
       throw new Error("\u043C\u043E\u0434\u0435\u043B\u044C \u043E\u0442\u0432\u0435\u0442\u0438\u043B\u0430 " + res.status + (body ? ": " + body : ""));
     }
     return readTurnText(res.text);
+  }
+  async callApi(provider, init) {
+    const route = httpRoute();
+    const seconds = provider.timeout;
+    if (seconds !== void 0 && route.kind === "unavailable") {
+      throw new Error("\u0442\u0430\u0439\u043C\u0430\u0443\u0442 \u0437\u0430\u0434\u0430\u043D, \u043D\u043E \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 \u043D\u0435\u0442 CapacitorHttp");
+    }
+    if (seconds !== void 0 && route.kind === "capacitor") {
+      const res = await route.request.request(capacitorOptions(init, seconds * 1e3));
+      return readHttpResult(res.status, res.data);
+    }
+    const pending = (0, import_obsidian.requestUrl)({
+      url: init.url,
+      method: init.method,
+      headers: init.headers,
+      body: init.body,
+      throw: false
+    }).then((res) => ({ status: res.status, text: res.text }));
+    if (seconds === void 0) return pending;
+    return withDeadline(pending, seconds * 1e3, "\u0442\u0430\u0439\u043C\u0430\u0443\u0442 " + seconds + " \u0441");
   }
   vaultFs() {
     const app = this.app;
@@ -1617,6 +1714,21 @@ var AgentSettingTab = class extends import_obsidian.PluginSettingTab {
       void this.fillModels(modelSetting, dropdown, provider);
     }));
     if (dropdown) void this.fillModels(modelSetting, dropdown, provider);
+    new import_obsidian.Setting(containerEl).setName("\u0422\u0430\u0439\u043C\u0430\u0443\u0442, \u0441\u0435\u043A\u0443\u043D\u0434\u044B").setDesc("\u0421\u043A\u043E\u043B\u044C\u043A\u043E \u0441\u0435\u043A\u0443\u043D\u0434 \u0436\u0434\u0430\u0442\u044C \u0441\u043B\u0435\u0434\u0443\u044E\u0449\u0438\u0435 \u0434\u0430\u043D\u043D\u044B\u0435. \u041F\u0443\u0441\u0442\u043E \u2014 \u043F\u0440\u0435\u0434\u0435\u043B Obsidian: \u043D\u0430 iPad \u043C\u043E\u043B\u0447\u0430\u043D\u0438\u0435 \u0434\u043E\u043B\u044C\u0448\u0435 \u043C\u0438\u043D\u0443\u0442\u044B \u043E\u0431\u0440\u044B\u0432\u0430\u0435\u0442 \u0437\u0430\u043F\u0440\u043E\u0441. \u0414\u043B\u044F \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u043E\u0439 \u043C\u043E\u0434\u0435\u043B\u0438 \u043F\u043E\u0441\u0442\u0430\u0432\u044C \u043D\u0435\u0441\u043A\u043E\u043B\u044C\u043A\u043E \u043C\u0438\u043D\u0443\u0442.").addText((text) => text.setPlaceholder("\u0441\u0435\u043A\u0443\u043D\u0434\u044B").setValue(provider.timeout === void 0 ? "" : String(provider.timeout)).onChange(async (value) => {
+      const raw = value.trim();
+      if (raw === "") {
+        delete provider.timeout;
+        await this.plugin.saveSettings();
+        return;
+      }
+      const timeout = Number(raw);
+      if (!Number.isInteger(timeout) || timeout < 1 || timeout > 3600) {
+        new import_obsidian.Notice("\u0442\u0430\u0439\u043C\u0430\u0443\u0442: \u0446\u0435\u043B\u043E\u0435 \u0447\u0438\u0441\u043B\u043E \u0441\u0435\u043A\u0443\u043D\u0434 \u043E\u0442 1 \u0434\u043E 3600");
+        return;
+      }
+      provider.timeout = timeout;
+      await this.plugin.saveSettings();
+    }));
   }
   async addProvider(presetId) {
     const preset = presetById(presetId);

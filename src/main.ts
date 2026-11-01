@@ -2,6 +2,7 @@ import { ItemView, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFil
 import { readTurnText, TOOLS, runAgent, systemPrompt, type ChatMessage } from "./agent.ts";
 import { newSession, sessionTitle, sessionsFromSaved, stripImages, type ChatLine, type Session } from "./chats.ts";
 import { listedModels, modelMenuLabel, modelNotes, type ListedModel } from "./models.ts";
+import { capacitorOptions, httpRoute, readHttpResult, withDeadline, type HttpInit } from "./http.ts";
 import { assignProviderBase, chatCompletionsUrl, freshSettings, modelsEndpoint, newProviderId, presetById, PROVIDER_PRESETS, providerCanList, providerFromPreset, providerLabel, providerNeedsKey, requestHeaders, settingsFromSaved, type AgentSettings, type Provider } from "./settings.ts";
 import { dispatchTool, type VaultFs } from "./vault.ts";
 
@@ -169,17 +170,16 @@ export default class AgentPlugin extends Plugin {
   }
 
   async fetchModels(provider: Provider): Promise<ListedModel[]> {
-    const res = await requestUrl({
+    const res = await this.callApi(provider, {
       url: modelsEndpoint(provider),
       method: "GET",
       headers: requestHeaders(provider, false),
-      throw: false,
     });
     if (res.status < 200 || res.status >= 300) {
-      const body = (res.text || "").slice(0, 500);
+      const body = res.text.slice(0, 500);
       throw new Error("список моделей ответил " + res.status + (body ? ": " + body : ""));
     }
-    return listedModels(res.json);
+    return listedModels(JSON.parse(res.text));
   }
 
   async saveSettings() {
@@ -272,18 +272,38 @@ export default class AgentPlugin extends Plugin {
   }
 
   private async post(provider: Provider, model: string, messages: ChatMessage[]) {
-    const res = await requestUrl({
+    const res = await this.callApi(provider, {
       url: chatCompletionsUrl(provider),
       method: "POST",
       headers: requestHeaders(provider, true),
       body: JSON.stringify({ model, messages, tools: TOOLS, stream: true }),
-      throw: false,
     });
     if (res.status < 200 || res.status >= 300) {
-      const body = (res.text || "").slice(0, 500);
+      const body = res.text.slice(0, 500);
       throw new Error("модель ответила " + res.status + (body ? ": " + body : ""));
     }
     return readTurnText(res.text);
+  }
+
+  private async callApi(provider: Provider, init: HttpInit): Promise<{ status: number; text: string }> {
+    const route = httpRoute();
+    const seconds = provider.timeout;
+    if (seconds !== undefined && route.kind === "unavailable") {
+      throw new Error("таймаут задан, но на устройстве нет CapacitorHttp");
+    }
+    if (seconds !== undefined && route.kind === "capacitor") {
+      const res = await route.request.request(capacitorOptions(init, seconds * 1000));
+      return readHttpResult(res.status, res.data);
+    }
+    const pending = requestUrl({
+      url: init.url,
+      method: init.method,
+      headers: init.headers,
+      body: init.body,
+      throw: false,
+    }).then((res) => ({ status: res.status, text: res.text }));
+    if (seconds === undefined) return pending;
+    return withDeadline(pending, seconds * 1000, "таймаут " + seconds + " с");
   }
 
   private vaultFs(): VaultFs {
@@ -772,6 +792,24 @@ class AgentSettingTab extends PluginSettingTab {
       void this.fillModels(modelSetting, dropdown, provider);
     }));
     if (dropdown) void this.fillModels(modelSetting, dropdown, provider);
+    new Setting(containerEl)
+      .setName("Таймаут, секунды")
+      .setDesc("Сколько секунд ждать следующие данные. Пусто — предел Obsidian: на iPad молчание дольше минуты обрывает запрос. Для локальной модели поставь несколько минут.")
+      .addText((text) => text.setPlaceholder("секунды").setValue(provider.timeout === undefined ? "" : String(provider.timeout)).onChange(async (value) => {
+        const raw = value.trim();
+        if (raw === "") {
+          delete provider.timeout;
+          await this.plugin.saveSettings();
+          return;
+        }
+        const timeout = Number(raw);
+        if (!Number.isInteger(timeout) || timeout < 1 || timeout > 3600) {
+          new Notice("таймаут: целое число секунд от 1 до 3600");
+          return;
+        }
+        provider.timeout = timeout;
+        await this.plugin.saveSettings();
+      }));
   }
 
   private async addProvider(presetId: string) {
