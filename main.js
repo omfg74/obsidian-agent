@@ -124,6 +124,90 @@ function readTurn(body) {
     finishReason: typeof reason === "string" && reason.trim() ? reason : null
   };
 }
+function readTurnText(text) {
+  const body = text.trim();
+  if (!body) throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F");
+  if (body.startsWith("{")) {
+    let parsed;
+    try {
+      parsed = JSON.parse(body);
+    } catch (e) {
+      throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F");
+    }
+    return readTurn(parsed);
+  }
+  return readEventStream(body);
+}
+function readEventStream(text) {
+  let content = null;
+  let finishReason = null;
+  let sawChoice = false;
+  const calls = /* @__PURE__ */ new Map();
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+    if (!line.startsWith("data:")) continue;
+    const payload = line.slice(5).trim();
+    if (!payload) throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F");
+    if (payload === "[DONE]") break;
+    let event;
+    try {
+      event = JSON.parse(payload);
+    } catch (e) {
+      throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F");
+    }
+    if (!event || typeof event !== "object") throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F");
+    const row = event;
+    if ("error" in row && row.error != null) throw new Error(streamError(row.error));
+    if (!("choices" in row)) continue;
+    if (!Array.isArray(row.choices) || !row.choices[0] || typeof row.choices[0] !== "object") throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F");
+    sawChoice = true;
+    const choice = row.choices[0];
+    if (typeof choice.finish_reason === "string" && choice.finish_reason.trim()) finishReason = choice.finish_reason;
+    if (!choice.delta || typeof choice.delta !== "object") continue;
+    const delta = choice.delta;
+    if ("content" in delta && delta.content != null) {
+      if (typeof delta.content !== "string") throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F");
+      content = (content != null ? content : "") + delta.content;
+    }
+    if ("tool_calls" in delta && delta.tool_calls != null) appendToolDeltas(calls, delta.tool_calls);
+  }
+  if (!sawChoice) throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F");
+  const tool_calls = [...calls.entries()].sort((a, b) => a[0] - b[0]).map(([, call]) => ({ id: call.id, type: "function", function: { name: call.name, arguments: call.arguments } }));
+  return { content, tool_calls: tool_calls.length > 0 ? tool_calls : void 0, finishReason };
+}
+function streamError(error) {
+  if (!error || typeof error !== "object" || !("message" in error)) throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F");
+  const message = error.message;
+  if (typeof message !== "string" || !message.trim()) throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F");
+  return message;
+}
+function appendToolDeltas(calls, value) {
+  var _a;
+  if (!Array.isArray(value)) throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F");
+  for (const item of value) {
+    if (!item || typeof item !== "object") throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F");
+    const row = item;
+    if (typeof row.index !== "number") throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F");
+    const current = (_a = calls.get(row.index)) != null ? _a : { id: "", name: "", arguments: "" };
+    if ("id" in row && row.id != null) {
+      if (typeof row.id !== "string" || !row.id) throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F");
+      current.id = row.id;
+    }
+    if ("function" in row && row.function != null) {
+      if (!row.function || typeof row.function !== "object") throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F");
+      const fn = row.function;
+      if ("name" in fn && fn.name != null) {
+        if (typeof fn.name !== "string" || !fn.name) throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F");
+        current.name = fn.name;
+      }
+      if ("arguments" in fn && fn.arguments != null) {
+        if (typeof fn.arguments !== "string") throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F");
+        current.arguments += fn.arguments;
+      }
+    }
+    calls.set(row.index, current);
+  }
+}
 function asRecord(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("\u0430\u0440\u0433\u0443\u043C\u0435\u043D\u0442\u044B \u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442\u0430 \u043D\u0435 \u043E\u0431\u044A\u0435\u043A\u0442");
@@ -1062,14 +1146,14 @@ var AgentPlugin = class extends import_obsidian.Plugin {
       url: chatCompletionsUrl(provider),
       method: "POST",
       headers: requestHeaders(provider, true),
-      body: JSON.stringify({ model, messages, tools: TOOLS }),
+      body: JSON.stringify({ model, messages, tools: TOOLS, stream: true }),
       throw: false
     });
     if (res.status < 200 || res.status >= 300) {
       const body = (res.text || "").slice(0, 500);
       throw new Error("\u043C\u043E\u0434\u0435\u043B\u044C \u043E\u0442\u0432\u0435\u0442\u0438\u043B\u0430 " + res.status + (body ? ": " + body : ""));
     }
-    return readTurn(res.json);
+    return readTurnText(res.text);
   }
   vaultFs() {
     const app = this.app;

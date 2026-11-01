@@ -1,5 +1,5 @@
 import { ItemView, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf, requestUrl, setIcon, setTooltip, type App, type DropdownComponent } from "obsidian";
-import { readTurn, TOOLS, runAgent, systemPrompt, type ChatMessage } from "./agent.ts";
+import { readTurnText, TOOLS, runAgent, systemPrompt, type ChatMessage } from "./agent.ts";
 import { newSession, sessionTitle, sessionsFromSaved, stripImages, type ChatLine, type Session } from "./chats.ts";
 import { listedModels, modelMenuLabel, modelNotes, type ListedModel } from "./models.ts";
 import { assignProviderBase, chatCompletionsUrl, freshSettings, modelsEndpoint, newProviderId, presetById, PROVIDER_PRESETS, providerCanList, providerFromPreset, providerLabel, providerNeedsKey, requestHeaders, settingsFromSaved, type AgentSettings, type Provider } from "./settings.ts";
@@ -276,14 +276,14 @@ export default class AgentPlugin extends Plugin {
       url: chatCompletionsUrl(provider),
       method: "POST",
       headers: requestHeaders(provider, true),
-      body: JSON.stringify({ model, messages, tools: TOOLS }),
+      body: JSON.stringify({ model, messages, tools: TOOLS, stream: true }),
       throw: false,
     });
     if (res.status < 200 || res.status >= 300) {
       const body = (res.text || "").slice(0, 500);
       throw new Error("модель ответила " + res.status + (body ? ": " + body : ""));
     }
-    return readTurn(res.json);
+    return readTurnText(res.text);
   }
 
   private vaultFs(): VaultFs {

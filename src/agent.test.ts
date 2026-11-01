@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readTurn, runAgent, systemPrompt, visibleToolResult } from "./agent.ts";
+import { readTurn, readTurnText, runAgent, systemPrompt, visibleToolResult } from "./agent.ts";
 import { replaceOnce } from "./replace.ts";
 import { dispatchTool, resolvePath, type VaultFs } from "./vault.ts";
 
@@ -120,6 +120,41 @@ test("ход показывает finish и длину аргумента", asyn
 
 test("длинный результат инструмента в чат не копируется", () => {
   assert.equal(visibleToolResult("read_note", "а".repeat(241)), "read_note: 241 символов");
+});
+
+test("поток собирает текст, а рассуждение в ответ не попадает", () => {
+  const text = [
+    'data: {"choices":[{"finish_reason":null,"delta":{"reasoning_content":"думаю"}}]}',
+    'data: {"choices":[{"finish_reason":null,"delta":{"content":"При"}}]}',
+    'data: {"choices":[{"finish_reason":"stop","delta":{"content":"вет"}}]}',
+    "data: [DONE]",
+  ].join("\n");
+  const turn = readTurnText(text);
+  assert.equal(turn.content, "Привет");
+  assert.equal(turn.finishReason, "stop");
+  assert.equal(turn.tool_calls, undefined);
+});
+
+test("поток склеивает аргумент инструмента", () => {
+  const text = [
+    'data: {"choices":[{"finish_reason":null,"delta":{"tool_calls":[{"index":0,"id":"1","function":{"name":"read_note","arguments":""}}]}}]}',
+    'data: {"choices":[{"finish_reason":"tool_calls","delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"path\\":\\"a.md\\"}"}}]}}]}',
+    "data: [DONE]",
+  ].join("\n");
+  const turn = readTurnText(text);
+  assert.equal(turn.finishReason, "tool_calls");
+  assert.equal(turn.tool_calls?.[0].function.arguments, '{"path":"a.md"}');
+});
+
+test("целый json читается тем же разбором", () => {
+  const turn = readTurnText(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: "ок" } }] }));
+  assert.equal(turn.content, "ок");
+  assert.equal(turn.finishReason, "stop");
+});
+
+test("ошибка внутри потока не прячется", () => {
+  assert.throws(() => readTurnText('data: {"error":{"message":"слот занят"}}\n'), /слот занят/);
+  assert.throws(() => readTurnText("не поток"), /в ответе нет сообщения/);
 });
 
 test("finish_reason length остаётся как прислал провайдер", () => {

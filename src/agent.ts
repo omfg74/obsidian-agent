@@ -127,6 +127,95 @@ export function readTurn(body: unknown): AssistantTurn {
   };
 }
 
+export function readTurnText(text: string): AssistantTurn {
+  const body = text.trim();
+  if (!body) throw new Error("в ответе нет сообщения");
+  if (body.startsWith("{")) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      throw new Error("в ответе нет сообщения");
+    }
+    return readTurn(parsed);
+  }
+  return readEventStream(body);
+}
+
+function readEventStream(text: string): AssistantTurn {
+  let content: string | null = null;
+  let finishReason: string | null = null;
+  let sawChoice = false;
+  const calls = new Map<number, { id: string; name: string; arguments: string }>();
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+    if (!line.startsWith("data:")) continue;
+    const payload = line.slice(5).trim();
+    if (!payload) throw new Error("в ответе нет сообщения");
+    if (payload === "[DONE]") break;
+    let event: unknown;
+    try {
+      event = JSON.parse(payload);
+    } catch {
+      throw new Error("в ответе нет сообщения");
+    }
+    if (!event || typeof event !== "object") throw new Error("в ответе нет сообщения");
+    const row = event as { error?: unknown; choices?: unknown };
+    if ("error" in row && row.error != null) throw new Error(streamError(row.error));
+    if (!("choices" in row)) continue;
+    if (!Array.isArray(row.choices) || !row.choices[0] || typeof row.choices[0] !== "object") throw new Error("в ответе нет сообщения");
+    sawChoice = true;
+    const choice = row.choices[0] as { finish_reason?: unknown; delta?: unknown };
+    if (typeof choice.finish_reason === "string" && choice.finish_reason.trim()) finishReason = choice.finish_reason;
+    if (!choice.delta || typeof choice.delta !== "object") continue;
+    const delta = choice.delta as { content?: unknown; tool_calls?: unknown };
+    if ("content" in delta && delta.content != null) {
+      if (typeof delta.content !== "string") throw new Error("в ответе нет сообщения");
+      content = (content ?? "") + delta.content;
+    }
+    if ("tool_calls" in delta && delta.tool_calls != null) appendToolDeltas(calls, delta.tool_calls);
+  }
+  if (!sawChoice) throw new Error("в ответе нет сообщения");
+  const tool_calls = [...calls.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([, call]) => ({ id: call.id, type: "function" as const, function: { name: call.name, arguments: call.arguments } }));
+  return { content, tool_calls: tool_calls.length > 0 ? tool_calls : undefined, finishReason };
+}
+
+function streamError(error: unknown): string {
+  if (!error || typeof error !== "object" || !("message" in error)) throw new Error("в ответе нет сообщения");
+  const message = (error as { message?: unknown }).message;
+  if (typeof message !== "string" || !message.trim()) throw new Error("в ответе нет сообщения");
+  return message;
+}
+
+function appendToolDeltas(calls: Map<number, { id: string; name: string; arguments: string }>, value: unknown) {
+  if (!Array.isArray(value)) throw new Error("в ответе нет сообщения");
+  for (const item of value) {
+    if (!item || typeof item !== "object") throw new Error("в ответе нет сообщения");
+    const row = item as { index?: unknown; id?: unknown; function?: unknown };
+    if (typeof row.index !== "number") throw new Error("в ответе нет сообщения");
+    const current = calls.get(row.index) ?? { id: "", name: "", arguments: "" };
+    if ("id" in row && row.id != null) {
+      if (typeof row.id !== "string" || !row.id) throw new Error("в ответе нет сообщения");
+      current.id = row.id;
+    }
+    if ("function" in row && row.function != null) {
+      if (!row.function || typeof row.function !== "object") throw new Error("в ответе нет сообщения");
+      const fn = row.function as { name?: unknown; arguments?: unknown };
+      if ("name" in fn && fn.name != null) {
+        if (typeof fn.name !== "string" || !fn.name) throw new Error("в ответе нет сообщения");
+        current.name = fn.name;
+      }
+      if ("arguments" in fn && fn.arguments != null) {
+        if (typeof fn.arguments !== "string") throw new Error("в ответе нет сообщения");
+        current.arguments += fn.arguments;
+      }
+    }
+    calls.set(row.index, current);
+  }
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("аргументы инструмента не объект");
