@@ -7,6 +7,7 @@ test("список берёт id и сортирует, без цены подп
   assert.deepEqual(models.map((model) => model.id), ["gpt-4o", "gpt-4o-mini"]);
   assert.equal(models[0].pay, null);
   assert.equal(models[0].images, null);
+  assert.equal(models[0].context, null);
   assert.equal(modelMenuLabel(models[0]), "gpt-4o");
 });
 
@@ -110,6 +111,34 @@ test("список только из другого API не становитс�
   assert.throws(() => listedModels({
     data: [{ id: "gpt", api: { responses: {} } }],
   }), /chat completions/);
+});
+
+test("размер окна берётся из одного поля списка", () => {
+  const models = listedModels({
+    data: [
+      { id: "router", context_length: 128000 },
+      { id: "groq", context_window: 8192 },
+      { id: "mistral", max_context_length: 32768 },
+      { id: "same", context_length: 4096, context_window: 4096 },
+    ],
+  });
+  const context = (id: string) => models.find((model) => model.id === id)?.context;
+  assert.equal(context("router"), 128000);
+  assert.equal(context("groq"), 8192);
+  assert.equal(context("mistral"), 32768);
+  assert.equal(context("same"), 4096);
+});
+
+test("битый или разный размер окна не подменяется", () => {
+  const models = listedModels({
+    data: [
+      { id: "text", context_length: "128000" },
+      { id: "zero", context_length: 0 },
+      { id: "split", context_length: 1000, context_window: 2000 },
+      { id: "broken-pair", context_length: "нет", context_window: 8192 },
+    ],
+  });
+  for (const model of models) assert.equal(model.context, null);
 });
 
 test("вход и выход together считаются ценой", () => {

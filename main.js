@@ -121,8 +121,22 @@ function readTurn(body) {
   return {
     content: (_a = message.content) != null ? _a : null,
     tool_calls: message.tool_calls,
-    finishReason: typeof reason === "string" && reason.trim() ? reason : null
+    finishReason: typeof reason === "string" && reason.trim() ? reason : null,
+    usage: readUsage(body.usage)
   };
+}
+function readUsage(value) {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value;
+  if (!("prompt_tokens" in row) || !("completion_tokens" in row)) return null;
+  const prompt = tokenCount(row.prompt_tokens);
+  const completion = tokenCount(row.completion_tokens);
+  if (prompt === null || completion === null) return null;
+  return { prompt, completion };
+}
+function tokenCount(value) {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) return null;
+  return value;
 }
 function readTurnText(text) {
   const body = text.trim();
@@ -142,6 +156,7 @@ function readEventStream(text) {
   let content = null;
   let finishReason = null;
   let sawChoice = false;
+  let usage = null;
   const calls = /* @__PURE__ */ new Map();
   for (const rawLine of text.split("\n")) {
     const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
@@ -157,6 +172,8 @@ function readEventStream(text) {
     }
     if (!event || typeof event !== "object") throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F");
     const row = event;
+    const parsedUsage = readUsage(row.usage);
+    if (parsedUsage) usage = parsedUsage;
     if ("error" in row && row.error != null) throw new Error(streamError(row.error));
     if (!("choices" in row)) continue;
     if (!Array.isArray(row.choices)) throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F");
@@ -175,7 +192,7 @@ function readEventStream(text) {
   }
   if (!sawChoice) throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F");
   const tool_calls = [...calls.entries()].sort((a, b) => a[0] - b[0]).map(([, call]) => ({ id: call.id, type: "function", function: { name: call.name, arguments: call.arguments } }));
-  return { content, tool_calls: tool_calls.length > 0 ? tool_calls : void 0, finishReason };
+  return { content, tool_calls: tool_calls.length > 0 ? tool_calls : void 0, finishReason, usage };
 }
 function streamError(error) {
   if (!error || typeof error !== "object" || !("message" in error)) throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F");
@@ -563,7 +580,15 @@ function readProvider(item) {
 
 // src/chats.ts
 function newSession() {
-  return { id: newProviderId(), title: "\u0447\u0430\u0442", lines: [], history: [], imagesOmitted: false };
+  return { id: newProviderId(), title: "\u0447\u0430\u0442", lines: [], history: [], imagesOmitted: false, contextUsed: null };
+}
+function contextLabel(used, limit) {
+  const text = groupDigits(used);
+  if (limit === null) return text;
+  return text + " / " + groupDigits(limit);
+}
+function groupDigits(value) {
+  return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
 }
 function sessionTitle(lines) {
   var _a, _b;
@@ -612,8 +637,14 @@ function readSession(item) {
     title: row.title.trim(),
     lines: row.lines.map(readLine),
     history: row.history.map(readMessage),
-    imagesOmitted: row.imagesOmitted
+    imagesOmitted: row.imagesOmitted,
+    contextUsed: readContextUsed(row.contextUsed)
   };
+}
+function readContextUsed(value) {
+  if (value === void 0 || value === null) return null;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) throw new Error("\u0447\u0430\u0442 \u043F\u043E\u0432\u0440\u0435\u0436\u0434\u0451\u043D");
+  return value;
 }
 function readLine(item) {
   if (!item || typeof item !== "object") throw new Error("\u0441\u0442\u0440\u043E\u043A\u0430 \u0447\u0430\u0442\u0430 \u043F\u043E\u0432\u0440\u0435\u0436\u0434\u0435\u043D\u0430");
@@ -659,6 +690,7 @@ function readToolCall(item) {
 
 // src/models.ts
 var PRICE_KEYS = ["prompt", "completion", "input", "output", "request", "image", "hourly", "audio"];
+var CONTEXT_KEYS = ["context_length", "context_window", "max_context_length"];
 function listedModels(body) {
   if (!body || typeof body !== "object" || !("data" in body)) throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043F\u0438\u0441\u043A\u0430 \u043C\u043E\u0434\u0435\u043B\u0435\u0439");
   const data = body.data;
@@ -679,7 +711,7 @@ function listedModels(body) {
     }
     if (seen.has(id)) continue;
     seen.add(id);
-    models.push({ id, pay: payOf(row), images: imagesOf(row) });
+    models.push({ id, pay: payOf(row), images: imagesOf(row), context: contextOf(row) });
   }
   if (models.length === 0) {
     throw new Error(foreign > 0 ? "\u0432 \u0441\u043F\u0438\u0441\u043A\u0435 \u043D\u0435\u0442 \u043C\u043E\u0434\u0435\u043B\u0435\u0439 \u0441 chat completions" : "\u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440 \u043D\u0435 \u0432\u0435\u0440\u043D\u0443\u043B \u043D\u0438 \u043E\u0434\u043D\u043E\u0439 \u043C\u043E\u0434\u0435\u043B\u0438");
@@ -754,6 +786,23 @@ function priceNumber(value) {
   const price = Number(text);
   if (!Number.isFinite(price) || price < 0) return null;
   return price;
+}
+function contextOf(row) {
+  const values = [];
+  for (const key of CONTEXT_KEYS) {
+    if (!(key in row) || row[key] == null) continue;
+    const value = contextLength(row[key]);
+    if (value === null) return null;
+    values.push(value);
+  }
+  if (values.length === 0) return null;
+  const [first] = values;
+  if (values.some((value) => value !== first)) return null;
+  return first;
+}
+function contextLength(value) {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) return null;
+  return value;
 }
 function imagesOf(row) {
   const architecture = row.architecture;
@@ -1203,7 +1252,12 @@ var AgentPlugin = class extends import_obsidian.Plugin {
         maxSteps: this.settings.maxSteps,
         shouldStop: () => this.stop,
         onLine: (line) => this.push({ kind: "tool", text: line }),
-        post: (batch) => this.post(provider, model, batch),
+        post: async (batch) => {
+          const turn = await this.post(provider, model, batch);
+          session.contextUsed = turn.usage === null ? null : turn.usage.prompt + turn.usage.completion;
+          this.paint();
+          return turn;
+        },
         callTool: (name, args) => dispatchTool(this.vaultFs(), name, args)
       });
       const last = messages[messages.length - 1];
@@ -1226,7 +1280,7 @@ var AgentPlugin = class extends import_obsidian.Plugin {
       url: chatCompletionsUrl(provider),
       method: "POST",
       headers: requestHeaders(provider, true),
-      body: JSON.stringify({ model, messages, tools: TOOLS, stream: true })
+      body: JSON.stringify({ model, messages, tools: TOOLS, stream: true, stream_options: { include_usage: true } })
     });
     if (res.status < 200 || res.status >= 300) {
       const body = res.text.slice(0, 500);
@@ -1363,6 +1417,10 @@ var AgentView = class extends import_obsidian.ItemView {
     this.modelSignature = "";
     this.chipEl = null;
     this.chipLabel = null;
+    this.meterEl = null;
+    this.meterLabel = null;
+    this.meterBar = null;
+    this.meterFill = null;
     this.chatLabel = null;
     this.modelState = null;
     this.modelLoading = "";
@@ -1417,6 +1475,11 @@ var AgentView = class extends import_obsidian.ItemView {
     this.chipLabel = this.chipEl.createSpan();
     const closeChip = iconButton(this.chipEl, "x", "\u0443\u0431\u0440\u0430\u0442\u044C \u0444\u0430\u0439\u043B");
     closeChip.addEventListener("click", () => void this.plugin.setFocus("", false));
+    this.meterEl = context.createDiv({ cls: "agent-meter" });
+    this.meterEl.hidden = true;
+    this.meterLabel = this.meterEl.createSpan({ cls: "agent-meter-label" });
+    this.meterBar = this.meterEl.createDiv({ cls: "agent-meter-bar" });
+    this.meterFill = this.meterBar.createSpan({ cls: "agent-meter-fill" });
     this.inputEl = composer.createEl("textarea", { attr: { rows: "3", placeholder: "\u0417\u0430\u0434\u0430\u043D\u0438\u0435 \u0434\u043B\u044F \u0437\u0430\u043C\u0435\u0442\u043A\u0438 \u0432 \u0444\u043E\u043A\u0443\u0441\u0435" } });
     this.inputEl.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
@@ -1474,6 +1537,7 @@ var AgentView = class extends import_obsidian.ItemView {
     this.syncProviderSelect();
     this.syncModelSelect();
     this.syncChip();
+    this.syncMeter();
     this.syncChatSelect();
     const provider = this.plugin.activeProvider();
     const listed = ((_a = this.modelState) == null ? void 0 : _a.providerId) === (provider == null ? void 0 : provider.id);
@@ -1540,6 +1604,47 @@ var AgentView = class extends import_obsidian.ItemView {
     const current = this.plugin.openNotePath() === focus ? " \xB7 \u0442\u0435\u043A\u0443\u0449\u0438\u0439" : "";
     this.chipLabel.setText(name + current);
   }
+  syncMeter() {
+    var _a, _b;
+    const meter = this.meterEl;
+    const label = this.meterLabel;
+    const bar = this.meterBar;
+    const fill = this.meterFill;
+    if (!meter || !label || !bar || !fill) return;
+    const used = (_b = (_a = this.plugin.activeSession()) == null ? void 0 : _a.contextUsed) != null ? _b : null;
+    if (used === null) {
+      meter.hidden = true;
+      return;
+    }
+    const limit = this.contextLimit();
+    meter.hidden = false;
+    label.setText(contextLabel(used, limit));
+    if (limit === null) {
+      bar.hidden = true;
+      meter.removeClass("is-over");
+      const tip2 = "\u043A\u043E\u043D\u0442\u0435\u043A\u0441\u0442 " + used + ", \u043E\u043A\u043D\u043E \u043C\u043E\u0434\u0435\u043B\u0438 \u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440 \u043D\u0435 \u043F\u0440\u0438\u0441\u043B\u0430\u043B";
+      meter.ariaLabel = tip2;
+      (0, import_obsidian.setTooltip)(meter, tip2);
+      return;
+    }
+    bar.hidden = false;
+    const over = used > limit;
+    meter.toggleClass("is-over", over);
+    fill.style.width = Math.min(100, used / limit * 100) + "%";
+    const tip = "\u043A\u043E\u043D\u0442\u0435\u043A\u0441\u0442 " + used + " \u0438\u0437 " + limit + ", " + Math.round(used / limit * 100) + "%";
+    meter.ariaLabel = tip;
+    (0, import_obsidian.setTooltip)(meter, tip);
+  }
+  contextLimit() {
+    const provider = this.plugin.activeProvider();
+    const state = this.modelState;
+    if (!provider || !state || state.providerId !== provider.id || !("models" in state)) return null;
+    const id = provider.model.trim();
+    if (!id) return null;
+    const model = state.models.find((item) => item.id === id);
+    if (!model) return null;
+    return model.context;
+  }
   syncChatSelect() {
     var _a, _b;
     const select = this.chatEl;
@@ -1585,7 +1690,7 @@ var AgentView = class extends import_obsidian.ItemView {
     (0, import_obsidian.setTooltip)(this.modelTrigger, caption);
     if (this.modelSignature !== signature) {
       menu.empty();
-      const rows = current && !models.some((model) => model.id === current) ? [{ id: current, pay: null, images: null }, ...models] : models;
+      const rows = current && !models.some((model) => model.id === current) ? [{ id: current, pay: null, images: null, context: null }, ...models] : models;
       if (rows.length === 0 && placeholder) menu.createDiv({ cls: "agent-model-row", text: placeholder });
       for (const model of rows) {
         const row = menu.createDiv({ cls: "agent-model-row", attr: { role: "option" } });

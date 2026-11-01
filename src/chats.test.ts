@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ChatMessage } from "./agent.ts";
-import { sessionTitle, sessionsFromSaved, stripImages } from "./chats.ts";
+import { contextLabel, sessionTitle, sessionsFromSaved, stripImages } from "./chats.ts";
 
 test("название чата берётся из первой реплики", () => {
   assert.equal(sessionTitle([{ kind: "user", text: "поправь лекцию" }]), "поправь лекцию");
@@ -34,4 +34,22 @@ test("битый чат не превращается в пустой", () => {
   });
   assert.equal(saved?.sessionId, "нет");
   assert.equal(saved?.sessions.length, 1);
+  assert.equal(saved?.sessions[0].contextUsed, null);
+});
+
+test("сохранённый размер контекста читается, битый не обнуляется", () => {
+  const saved = sessionsFromSaved({
+    sessionId: "a",
+    sessions: [{ id: "a", title: "лекция", lines: [], history: [], imagesOmitted: false, contextUsed: 1200 }],
+  });
+  assert.equal(saved?.sessions[0].contextUsed, 1200);
+  assert.throws(() => sessionsFromSaved({
+    sessions: [{ id: "a", title: "лекция", lines: [], history: [], imagesOmitted: false, contextUsed: "1200" }],
+  }), /чат повреждён/);
+});
+
+test("подпись счётчика группирует тысячи и не выдумывает окно", () => {
+  assert.equal(contextLabel(8300, 128000), "8 300 / 128 000");
+  assert.equal(contextLabel(8300, null), "8 300");
+  assert.equal(contextLabel(12, null), "12");
 });

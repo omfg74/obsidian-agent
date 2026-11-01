@@ -1,6 +1,6 @@
 import { ItemView, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf, requestUrl, setIcon, setTooltip, type App, type DropdownComponent } from "obsidian";
 import { readTurnText, TOOLS, runAgent, systemPrompt, type ChatMessage } from "./agent.ts";
-import { newSession, sessionTitle, sessionsFromSaved, stripImages, type ChatLine, type Session } from "./chats.ts";
+import { contextLabel, newSession, sessionTitle, sessionsFromSaved, stripImages, type ChatLine, type Session } from "./chats.ts";
 import { listedModels, modelMenuLabel, modelNotes, type ListedModel } from "./models.ts";
 import { capacitorOptions, httpRoute, readHttpResult, withDeadline, type HttpInit } from "./http.ts";
 import { assignProviderBase, chatCompletionsUrl, freshSettings, modelsEndpoint, newProviderId, presetById, PROVIDER_PRESETS, providerCanList, providerFromPreset, providerLabel, providerNeedsKey, requestHeaders, settingsFromSaved, type AgentSettings, type Provider } from "./settings.ts";
@@ -252,7 +252,12 @@ export default class AgentPlugin extends Plugin {
         maxSteps: this.settings.maxSteps,
         shouldStop: () => this.stop,
         onLine: (line) => this.push({ kind: "tool", text: line }),
-        post: (batch) => this.post(provider, model, batch),
+        post: async (batch) => {
+          const turn = await this.post(provider, model, batch);
+          session.contextUsed = turn.usage === null ? null : turn.usage.prompt + turn.usage.completion;
+          this.paint();
+          return turn;
+        },
         callTool: (name, args) => dispatchTool(this.vaultFs(), name, args),
       });
       const last = messages[messages.length - 1];
@@ -276,7 +281,7 @@ export default class AgentPlugin extends Plugin {
       url: chatCompletionsUrl(provider),
       method: "POST",
       headers: requestHeaders(provider, true),
-      body: JSON.stringify({ model, messages, tools: TOOLS, stream: true }),
+      body: JSON.stringify({ model, messages, tools: TOOLS, stream: true, stream_options: { include_usage: true } }),
     });
     if (res.status < 200 || res.status >= 300) {
       const body = res.text.slice(0, 500);
@@ -414,6 +419,10 @@ class AgentView extends ItemView {
   modelSignature = "";
   chipEl: HTMLElement | null = null;
   chipLabel: HTMLElement | null = null;
+  meterEl: HTMLElement | null = null;
+  meterLabel: HTMLElement | null = null;
+  meterBar: HTMLElement | null = null;
+  meterFill: HTMLElement | null = null;
   chatLabel: HTMLElement | null = null;
   modelState: { providerId: string; models: ListedModel[] } | { providerId: string; error: string } | null = null;
   modelLoading = "";
@@ -465,6 +474,11 @@ class AgentView extends ItemView {
     this.chipLabel = this.chipEl.createSpan();
     const closeChip = iconButton(this.chipEl, "x", "убрать файл");
     closeChip.addEventListener("click", () => void this.plugin.setFocus("", false));
+    this.meterEl = context.createDiv({ cls: "agent-meter" });
+    this.meterEl.hidden = true;
+    this.meterLabel = this.meterEl.createSpan({ cls: "agent-meter-label" });
+    this.meterBar = this.meterEl.createDiv({ cls: "agent-meter-bar" });
+    this.meterFill = this.meterBar.createSpan({ cls: "agent-meter-fill" });
     this.inputEl = composer.createEl("textarea", { attr: { rows: "3", placeholder: "Задание для заметки в фокусе" } });
     this.inputEl.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
@@ -531,6 +545,7 @@ class AgentView extends ItemView {
     this.syncProviderSelect();
     this.syncModelSelect();
     this.syncChip();
+    this.syncMeter();
     this.syncChatSelect();
     const provider = this.plugin.activeProvider();
     const listed = this.modelState?.providerId === provider?.id;
@@ -600,6 +615,48 @@ class AgentView extends ItemView {
     this.chipLabel.setText(name + current);
   }
 
+  private syncMeter() {
+    const meter = this.meterEl;
+    const label = this.meterLabel;
+    const bar = this.meterBar;
+    const fill = this.meterFill;
+    if (!meter || !label || !bar || !fill) return;
+    const used = this.plugin.activeSession()?.contextUsed ?? null;
+    if (used === null) {
+      meter.hidden = true;
+      return;
+    }
+    const limit = this.contextLimit();
+    meter.hidden = false;
+    label.setText(contextLabel(used, limit));
+    if (limit === null) {
+      bar.hidden = true;
+      meter.removeClass("is-over");
+      const tip = "контекст " + used + ", окно модели провайдер не прислал";
+      meter.ariaLabel = tip;
+      setTooltip(meter, tip);
+      return;
+    }
+    bar.hidden = false;
+    const over = used > limit;
+    meter.toggleClass("is-over", over);
+    fill.style.width = Math.min(100, (used / limit) * 100) + "%";
+    const tip = "контекст " + used + " из " + limit + ", " + Math.round((used / limit) * 100) + "%";
+    meter.ariaLabel = tip;
+    setTooltip(meter, tip);
+  }
+
+  private contextLimit(): number | null {
+    const provider = this.plugin.activeProvider();
+    const state = this.modelState;
+    if (!provider || !state || state.providerId !== provider.id || !("models" in state)) return null;
+    const id = provider.model.trim();
+    if (!id) return null;
+    const model = state.models.find((item) => item.id === id);
+    if (!model) return null;
+    return model.context;
+  }
+
   private syncChatSelect() {
     const select = this.chatEl;
     if (!select) return;
@@ -645,7 +702,7 @@ class AgentView extends ItemView {
     setTooltip(this.modelTrigger, caption);
     if (this.modelSignature !== signature) {
       menu.empty();
-      const rows = current && !models.some((model) => model.id === current) ? [{ id: current, pay: null, images: null }, ...models] : models;
+      const rows = current && !models.some((model) => model.id === current) ? [{ id: current, pay: null, images: null, context: null }, ...models] : models;
       if (rows.length === 0 && placeholder) menu.createDiv({ cls: "agent-model-row", text: placeholder });
       for (const model of rows) {
         const row = menu.createDiv({ cls: "agent-model-row", attr: { role: "option" } });

@@ -135,6 +135,7 @@ test("хвост со списанием не затирает текст пла
   const turn = readTurnText(text);
   assert.equal(turn.content, "Всё работает");
   assert.equal(turn.finishReason, "stop");
+  assert.deepEqual(turn.usage, { prompt: 8, completion: 2 });
 });
 
 test("поток из одних пустых choices остаётся ошибкой", () => {
@@ -166,9 +167,34 @@ test("поток склеивает аргумент инструмента", ()
 });
 
 test("целый json читается тем же разбором", () => {
-  const turn = readTurnText(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: "ок" } }] }));
+  const turn = readTurnText(JSON.stringify({
+    choices: [{ finish_reason: "stop", message: { content: "ок" } }],
+    usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 },
+  }));
   assert.equal(turn.content, "ок");
   assert.equal(turn.finishReason, "stop");
+  assert.deepEqual(turn.usage, { prompt: 3, completion: 1 });
+});
+
+test("нет usage и битый usage не становятся нулём токенов", () => {
+  const plain = readTurnText(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: "ок" } }] }));
+  assert.equal(plain.usage, null);
+  const broken = readTurnText(JSON.stringify({
+    choices: [{ finish_reason: "stop", message: { content: "ок" } }],
+    usage: { prompt_tokens: "много", completion_tokens: 1 },
+  }));
+  assert.equal(broken.content, "ок");
+  assert.equal(broken.usage, null);
+  const half = readTurnText(JSON.stringify({
+    choices: [{ finish_reason: "stop", message: { content: "ок" } }],
+    usage: { prompt_tokens: 4 },
+  }));
+  assert.equal(half.usage, null);
+  const empty = readTurnText(JSON.stringify({
+    choices: [{ finish_reason: "stop", message: { content: "ок" } }],
+    usage: { prompt_tokens: 0, completion_tokens: 0 },
+  }));
+  assert.deepEqual(empty.usage, { prompt: 0, completion: 0 });
 });
 
 test("ошибка внутри потока не прячется", () => {

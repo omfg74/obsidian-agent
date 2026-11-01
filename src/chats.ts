@@ -9,10 +9,21 @@ export interface Session {
   lines: ChatLine[];
   history: ChatMessage[];
   imagesOmitted: boolean;
+  contextUsed: number | null;
 }
 
 export function newSession(): Session {
-  return { id: newProviderId(), title: "чат", lines: [], history: [], imagesOmitted: false };
+  return { id: newProviderId(), title: "чат", lines: [], history: [], imagesOmitted: false, contextUsed: null };
+}
+
+export function contextLabel(used: number, limit: number | null): string {
+  const text = groupDigits(used);
+  if (limit === null) return text;
+  return text + " / " + groupDigits(limit);
+}
+
+function groupDigits(value: number): string {
+  return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
 }
 
 export function sessionTitle(lines: ChatLine[]): string {
@@ -66,7 +77,14 @@ function readSession(item: unknown): Session {
     lines: row.lines.map(readLine),
     history: row.history.map(readMessage),
     imagesOmitted: row.imagesOmitted,
+    contextUsed: readContextUsed(row.contextUsed),
   };
+}
+
+function readContextUsed(value: unknown): number | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) throw new Error("чат повреждён");
+  return value;
 }
 
 function readLine(item: unknown): ChatLine {

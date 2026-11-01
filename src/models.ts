@@ -2,9 +2,11 @@ export interface ListedModel {
   id: string;
   pay: "free" | "paid" | null;
   images: boolean | null;
+  context: number | null;
 }
 
 const PRICE_KEYS = ["prompt", "completion", "input", "output", "request", "image", "hourly", "audio"];
+const CONTEXT_KEYS = ["context_length", "context_window", "max_context_length"] as const;
 
 export function listedModels(body: unknown): ListedModel[] {
   if (!body || typeof body !== "object" || !("data" in body)) throw new Error("в ответе нет списка моделей");
@@ -26,7 +28,7 @@ export function listedModels(body: unknown): ListedModel[] {
     }
     if (seen.has(id)) continue;
     seen.add(id);
-    models.push({ id, pay: payOf(row), images: imagesOf(row) });
+    models.push({ id, pay: payOf(row), images: imagesOf(row), context: contextOf(row) });
   }
   if (models.length === 0) {
     throw new Error(foreign > 0 ? "в списке нет моделей с chat completions" : "провайдер не вернул ни одной модели");
@@ -111,6 +113,25 @@ function priceNumber(value: unknown): number | null {
   const price = Number(text);
   if (!Number.isFinite(price) || price < 0) return null;
   return price;
+}
+
+function contextOf(row: Record<string, unknown>): number | null {
+  const values: number[] = [];
+  for (const key of CONTEXT_KEYS) {
+    if (!(key in row) || row[key] == null) continue;
+    const value = contextLength(row[key]);
+    if (value === null) return null;
+    values.push(value);
+  }
+  if (values.length === 0) return null;
+  const [first] = values;
+  if (values.some((value) => value !== first)) return null;
+  return first;
+}
+
+function contextLength(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) return null;
+  return value;
 }
 
 function imagesOf(row: Record<string, unknown>): boolean | null {

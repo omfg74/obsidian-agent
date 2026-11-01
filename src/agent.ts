@@ -21,7 +21,9 @@ export type ToolOutput = { text: string; image?: ToolImage };
 
 export type ToolHandler = (name: string, args: Record<string, unknown>) => Promise<ToolOutput>;
 
-export type AssistantTurn = { content: string | null; tool_calls?: ToolCall[]; finishReason: string | null };
+export type TokenUsage = { prompt: number; completion: number };
+
+export type AssistantTurn = { content: string | null; tool_calls?: ToolCall[]; finishReason: string | null; usage: TokenUsage | null };
 
 export const TOOLS = [
   {
@@ -124,7 +126,23 @@ export function readTurn(body: unknown): AssistantTurn {
     content: message.content ?? null,
     tool_calls: message.tool_calls,
     finishReason: typeof reason === "string" && reason.trim() ? reason : null,
+    usage: readUsage((body as { usage?: unknown }).usage),
   };
+}
+
+function readUsage(value: unknown): TokenUsage | null {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  if (!("prompt_tokens" in row) || !("completion_tokens" in row)) return null;
+  const prompt = tokenCount(row.prompt_tokens);
+  const completion = tokenCount(row.completion_tokens);
+  if (prompt === null || completion === null) return null;
+  return { prompt, completion };
+}
+
+function tokenCount(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) return null;
+  return value;
 }
 
 export function readTurnText(text: string): AssistantTurn {
@@ -146,6 +164,7 @@ function readEventStream(text: string): AssistantTurn {
   let content: string | null = null;
   let finishReason: string | null = null;
   let sawChoice = false;
+  let usage: TokenUsage | null = null;
   const calls = new Map<number, { id: string; name: string; arguments: string }>();
   for (const rawLine of text.split("\n")) {
     const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
@@ -160,7 +179,9 @@ function readEventStream(text: string): AssistantTurn {
       throw new Error("в ответе нет сообщения");
     }
     if (!event || typeof event !== "object") throw new Error("в ответе нет сообщения");
-    const row = event as { error?: unknown; choices?: unknown };
+    const row = event as { error?: unknown; choices?: unknown; usage?: unknown };
+    const parsedUsage = readUsage(row.usage);
+    if (parsedUsage) usage = parsedUsage;
     if ("error" in row && row.error != null) throw new Error(streamError(row.error));
     if (!("choices" in row)) continue;
     if (!Array.isArray(row.choices)) throw new Error("в ответе нет сообщения");
@@ -181,7 +202,7 @@ function readEventStream(text: string): AssistantTurn {
   const tool_calls = [...calls.entries()]
     .sort((a, b) => a[0] - b[0])
     .map(([, call]) => ({ id: call.id, type: "function" as const, function: { name: call.name, arguments: call.arguments } }));
-  return { content, tool_calls: tool_calls.length > 0 ? tool_calls : undefined, finishReason };
+  return { content, tool_calls: tool_calls.length > 0 ? tool_calls : undefined, finishReason, usage };
 }
 
 function streamError(error: unknown): string {
