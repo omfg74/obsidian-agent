@@ -183,7 +183,6 @@
   flex-direction: column;
   gap: 6px;
   border: 1px solid var(--background-modifier-border);
-  border-radius: 12px;
   padding: 8px;
 }
 
