@@ -446,6 +446,12 @@ class AgentView extends ItemView {
     const closeChip = iconButton(this.chipEl, "x", "убрать файл");
     closeChip.addEventListener("click", () => void this.plugin.setFocus("", false));
     this.inputEl = composer.createEl("textarea", { attr: { rows: "3", placeholder: "Задание для заметки в фокусе" } });
+    this.inputEl.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+      if (this.plugin.running) return;
+      event.preventDefault();
+      this.onSend();
+    });
     const bar = composer.createDiv({ cls: "agent-composer-bar" });
     const modelWrap = bar.createDiv({ cls: "agent-model" });
     this.modelTrigger = modelWrap.createDiv({ cls: "agent-picker agent-model-trigger", attr: { role: "button", tabindex: "0" } });

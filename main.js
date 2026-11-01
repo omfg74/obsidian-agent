@@ -1321,6 +1321,12 @@ var AgentView = class extends import_obsidian.ItemView {
     const closeChip = iconButton(this.chipEl, "x", "\u0443\u0431\u0440\u0430\u0442\u044C \u0444\u0430\u0439\u043B");
     closeChip.addEventListener("click", () => void this.plugin.setFocus("", false));
     this.inputEl = composer.createEl("textarea", { attr: { rows: "3", placeholder: "\u0417\u0430\u0434\u0430\u043D\u0438\u0435 \u0434\u043B\u044F \u0437\u0430\u043C\u0435\u0442\u043A\u0438 \u0432 \u0444\u043E\u043A\u0443\u0441\u0435" } });
+    this.inputEl.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+      if (this.plugin.running) return;
+      event.preventDefault();
+      this.onSend();
+    });
     const bar = composer.createDiv({ cls: "agent-composer-bar" });
     const modelWrap = bar.createDiv({ cls: "agent-model" });
     this.modelTrigger = modelWrap.createDiv({ cls: "agent-picker agent-model-trigger", attr: { role: "button", tabindex: "0" } });
