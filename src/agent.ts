@@ -163,7 +163,9 @@ function readEventStream(text: string): AssistantTurn {
     const row = event as { error?: unknown; choices?: unknown };
     if ("error" in row && row.error != null) throw new Error(streamError(row.error));
     if (!("choices" in row)) continue;
-    if (!Array.isArray(row.choices) || !row.choices[0] || typeof row.choices[0] !== "object") throw new Error("в ответе нет сообщения");
+    if (!Array.isArray(row.choices)) throw new Error("в ответе нет сообщения");
+    if (row.choices.length === 0) continue;
+    if (!row.choices[0] || typeof row.choices[0] !== "object") throw new Error("в ответе нет сообщения");
     sawChoice = true;
     const choice = row.choices[0] as { finish_reason?: unknown; delta?: unknown };
     if (typeof choice.finish_reason === "string" && choice.finish_reason.trim()) finishReason = choice.finish_reason;

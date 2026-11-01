@@ -159,7 +159,9 @@ function readEventStream(text) {
     const row = event;
     if ("error" in row && row.error != null) throw new Error(streamError(row.error));
     if (!("choices" in row)) continue;
-    if (!Array.isArray(row.choices) || !row.choices[0] || typeof row.choices[0] !== "object") throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F");
+    if (!Array.isArray(row.choices)) throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F");
+    if (row.choices.length === 0) continue;
+    if (!row.choices[0] || typeof row.choices[0] !== "object") throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F");
     sawChoice = true;
     const choice = row.choices[0];
     if (typeof choice.finish_reason === "string" && choice.finish_reason.trim()) finishReason = choice.finish_reason;

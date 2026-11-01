@@ -122,6 +122,25 @@ test("длинный результат инструмента в чат не к
   assert.equal(visibleToolResult("read_note", "а".repeat(241)), "read_note: 241 символов");
 });
 
+test("хвост со списанием не затирает текст платной модели", () => {
+  const text = [
+    'data: {"id":"gen","choices":[]}',
+    'data: {"choices":[{"finish_reason":null,"delta":{"reasoning_content":"думаю"}}]}',
+    'data: {"choices":[{"finish_reason":null,"delta":{"content":"Всё работает"}}]}',
+    'data: {"choices":[{"finish_reason":"stop","delta":{}}]}',
+    'data: {"choices":[],"usage":{"prompt_tokens":8,"completion_tokens":2}}',
+    'data: {"choices":[],"cost":"0.01"}',
+    "data: [DONE]",
+  ].join("\n");
+  const turn = readTurnText(text);
+  assert.equal(turn.content, "Всё работает");
+  assert.equal(turn.finishReason, "stop");
+});
+
+test("поток из одних пустых choices остаётся ошибкой", () => {
+  assert.throws(() => readTurnText('data: {"choices":[],"cost":"0"}\ndata: [DONE]\n'), /в ответе нет сообщения/);
+});
+
 test("поток собирает текст, а рассуждение в ответ не попадает", () => {
   const text = [
     'data: {"choices":[{"finish_reason":null,"delta":{"reasoning_content":"думаю"}}]}',
