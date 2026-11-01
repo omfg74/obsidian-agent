@@ -338,6 +338,24 @@
   border: none;
   background: transparent;
   padding: 2px;
+  border-radius: 0;
+}
+
+.workspace-leaf-content[data-type="obsidian-agent"] {
+  --input-radius: 0;
+  --textarea-radius: 0;
+  --clickable-icon-radius: 0;
+  border-radius: 0;
+}
+
+.workspace-leaf:has(> .workspace-leaf-content[data-type="obsidian-agent"]),
+.workspace-leaf-content[data-type="obsidian-agent"] .view-header,
+.workspace-leaf-content[data-type="obsidian-agent"] .view-content,
+.workspace-leaf-content[data-type="obsidian-agent"] .agent-composer,
+.workspace-leaf-content[data-type="obsidian-agent"] .agent-model-menu,
+.workspace-leaf-content[data-type="obsidian-agent"] textarea,
+.workspace-leaf-content[data-type="obsidian-agent"] select {
+  border-radius: 0;
 }
 
 .agent-composer-bar {
