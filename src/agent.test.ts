@@ -9,6 +9,8 @@ test("открытая заметка названа в подсказке", () 
   assert.match(prompt, /Фокус: уг\.md/);
   assert.match(prompt, /другой файл не создавай/);
   assert.match(prompt, /create_folder/);
+  assert.match(prompt, /читался с первого раза/);
+  assert.match(prompt, /Содержание держи в заметке/);
 });
 
 test("replaceOnce меняет одно вхождение", () => {
