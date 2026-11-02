@@ -3,7 +3,7 @@ import { readTurnText, TOOLS, runAgent, systemPrompt, type ChatMessage } from ".
 import { contextLabel, newSession, nextContextUsed, sessionTitle, sessionsFromSaved, stripImages, type ChatLine, type Session } from "./chats.ts";
 import { listedModels, modelMenuLabel, modelNotes, type ListedModel } from "./models.ts";
 import { capacitorOptions, httpRoute, readHttpResult, withDeadline, type HttpInit } from "./http.ts";
-import { assignProviderBase, chatCompletionsUrl, freshSettings, modelsEndpoint, newProviderId, presetById, PROVIDER_PRESETS, providerCanList, providerFromPreset, providerLabel, providerNeedsKey, requestHeaders, settingsFromSaved, type AgentSettings, type Provider } from "./settings.ts";
+import { assignProviderBase, chatCompletionsUrl, freshSettings, MAX_STEPS, modelsEndpoint, newProviderId, presetById, PROVIDER_PRESETS, providerCanList, providerFromPreset, providerLabel, providerNeedsKey, requestHeaders, settingsFromSaved, type AgentSettings, type Provider } from "./settings.ts";
 import { readOpenNote, writeOpenNote, type OpenEditor } from "./note-write.ts";
 import { dispatchTool, type VaultFs } from "./vault.ts";
 
@@ -876,8 +876,8 @@ class AgentSettingTab extends PluginSettingTab {
       .setName("Шагов за ответ")
       .addText((text) => text.setValue(String(this.plugin.settings.maxSteps)).onChange(async (value) => {
         const steps = Number(value);
-        if (!Number.isInteger(steps) || steps < 1 || steps > 30) {
-          new Notice("шаги: целое от 1 до 30");
+        if (!Number.isInteger(steps) || steps < 1 || steps > MAX_STEPS) {
+          new Notice("шаги: целое от 1 до " + MAX_STEPS);
           return;
         }
         this.plugin.settings.maxSteps = steps;

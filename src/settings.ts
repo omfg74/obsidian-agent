@@ -167,6 +167,8 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
   },
 ];
 
+export const MAX_STEPS = 100;
+
 export interface AgentSettings {
   providers: Provider[];
   activeId: string;
@@ -293,7 +295,7 @@ export function settingsFromSaved(saved: unknown): AgentSettings {
 
 function readSteps(value: unknown): number {
   if (value === undefined) return 8;
-  if (typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 30) return value;
+  if (typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= MAX_STEPS) return value;
   throw new Error("шаги в настройках повреждены");
 }
 

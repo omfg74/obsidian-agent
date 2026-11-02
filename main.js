@@ -444,6 +444,7 @@ var PROVIDER_PRESETS = [
     hint: "\u0410\u0434\u0440\u0435\u0441 \u0441\u0435\u0440\u0432\u0435\u0440\u0430 \u0432 \u0441\u0435\u0442\u0438, \u0431\u0435\u0437 /chat/completions. \u041D\u0430\u043F\u0440\u0438\u043C\u0435\u0440 http://192.168.1.10:11434/v1. \u041D\u0430 iPad \u043C\u043E\u0434\u0435\u043B\u044C \u043D\u0435 \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0435\u0442\u0441\u044F. \u041A\u043B\u044E\u0447 \u043D\u0435 \u043E\u0431\u044F\u0437\u0430\u0442\u0435\u043B\u0435\u043D."
   }
 ];
+var MAX_STEPS = 100;
 function freshSettings() {
   return {
     providers: [{ id: "openai", name: "OpenAI", base: "https://api.openai.com/v1", key: "", model: "gpt-4o" }],
@@ -552,7 +553,7 @@ function settingsFromSaved(saved) {
 }
 function readSteps(value) {
   if (value === void 0) return 8;
-  if (typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 30) return value;
+  if (typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= MAX_STEPS) return value;
   throw new Error("\u0448\u0430\u0433\u0438 \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0430\u0445 \u043F\u043E\u0432\u0440\u0435\u0436\u0434\u0435\u043D\u044B");
 }
 function readProviders(value) {
@@ -1918,8 +1919,8 @@ var AgentSettingTab = class extends import_obsidian.PluginSettingTab {
     }
     new import_obsidian.Setting(containerEl).setName("\u0428\u0430\u0433\u043E\u0432 \u0437\u0430 \u043E\u0442\u0432\u0435\u0442").addText((text) => text.setValue(String(this.plugin.settings.maxSteps)).onChange(async (value) => {
       const steps = Number(value);
-      if (!Number.isInteger(steps) || steps < 1 || steps > 30) {
-        new import_obsidian.Notice("\u0448\u0430\u0433\u0438: \u0446\u0435\u043B\u043E\u0435 \u043E\u0442 1 \u0434\u043E 30");
+      if (!Number.isInteger(steps) || steps < 1 || steps > MAX_STEPS) {
+        new import_obsidian.Notice("\u0448\u0430\u0433\u0438: \u0446\u0435\u043B\u043E\u0435 \u043E\u0442 1 \u0434\u043E " + MAX_STEPS);
         return;
       }
       this.plugin.settings.maxSteps = steps;

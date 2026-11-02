@@ -156,6 +156,12 @@ test("таймаут провайдера читается в секундах, 
   }), /таймаут/);
 });
 
+test("шаги принимаются до 100 и не выше", () => {
+  assert.equal(settingsFromSaved({ providers: [], maxSteps: 100 }).maxSteps, 100);
+  assert.throws(() => settingsFromSaved({ providers: [], maxSteps: 101 }), /шаги/);
+  assert.throws(() => settingsFromSaved({ providers: [], maxSteps: 0 }), /шаги/);
+});
+
 test("битый провайдер не превращается в рабочий", () => {
   assert.throws(() => settingsFromSaved({ providers: [{ id: "a" }] }), /повреждён|без /);
   assert.throws(() => settingsFromSaved({
