@@ -131,12 +131,21 @@ export function readTurn(body: unknown): AssistantTurn {
 }
 
 function readUsage(value: unknown): TokenUsage | null {
+  const part = readUsagePart(value);
+  if (!part || part.prompt === null || part.completion === null) return null;
+  return { prompt: part.prompt, completion: part.completion };
+}
+
+function readUsagePart(value: unknown): { prompt: number | null; completion: number | null } | null {
   if (value == null || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
-  if (!("prompt_tokens" in row) || !("completion_tokens" in row)) return null;
-  const prompt = tokenCount(row.prompt_tokens);
-  const completion = tokenCount(row.completion_tokens);
-  if (prompt === null || completion === null) return null;
+  const hasPrompt = "prompt_tokens" in row;
+  const hasCompletion = "completion_tokens" in row;
+  if (!hasPrompt && !hasCompletion) return null;
+  const prompt = hasPrompt ? tokenCount(row.prompt_tokens) : null;
+  const completion = hasCompletion ? tokenCount(row.completion_tokens) : null;
+  if (hasPrompt && prompt === null) return null;
+  if (hasCompletion && completion === null) return null;
   return { prompt, completion };
 }
 
@@ -164,7 +173,8 @@ function readEventStream(text: string): AssistantTurn {
   let content: string | null = null;
   let finishReason: string | null = null;
   let sawChoice = false;
-  let usage: TokenUsage | null = null;
+  let promptTokens: number | null = null;
+  let completionTokens: number | null = null;
   const calls = new Map<number, { id: string; name: string; arguments: string }>();
   for (const rawLine of text.split("\n")) {
     const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
@@ -180,8 +190,9 @@ function readEventStream(text: string): AssistantTurn {
     }
     if (!event || typeof event !== "object") throw new Error("в ответе нет сообщения");
     const row = event as { error?: unknown; choices?: unknown; usage?: unknown };
-    const parsedUsage = readUsage(row.usage);
-    if (parsedUsage) usage = parsedUsage;
+    const part = readUsagePart(row.usage);
+    if (part?.prompt != null) promptTokens = Math.max(promptTokens ?? 0, part.prompt);
+    if (part?.completion != null) completionTokens = Math.max(completionTokens ?? 0, part.completion);
     if ("error" in row && row.error != null) throw new Error(streamError(row.error));
     if (!("choices" in row)) continue;
     if (!Array.isArray(row.choices)) throw new Error("в ответе нет сообщения");
@@ -202,6 +213,7 @@ function readEventStream(text: string): AssistantTurn {
   const tool_calls = [...calls.entries()]
     .sort((a, b) => a[0] - b[0])
     .map(([, call]) => ({ id: call.id, type: "function" as const, function: { name: call.name, arguments: call.arguments } }));
+  const usage = promptTokens === null || completionTokens === null ? null : { prompt: promptTokens, completion: completionTokens };
   return { content, tool_calls: tool_calls.length > 0 ? tool_calls : undefined, finishReason, usage };
 }
 

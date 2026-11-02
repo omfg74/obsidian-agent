@@ -138,6 +138,18 @@ test("хвост со списанием не затирает текст пла
   assert.deepEqual(turn.usage, { prompt: 8, completion: 2 });
 });
 
+test("поздний кусок с ответом не затирает вход всего чата", () => {
+  const text = [
+    'data: {"choices":[{"finish_reason":null,"delta":{"content":"а"}}],"usage":{"prompt_tokens":5000}}',
+    'data: {"choices":[{"finish_reason":"stop","delta":{}}],"usage":{"completion_tokens":2132}}',
+    'data: {"choices":[],"usage":{"prompt_tokens":0,"completion_tokens":2132}}',
+    "data: [DONE]",
+  ].join("\n");
+  const turn = readTurnText(text);
+  assert.equal(turn.content, "а");
+  assert.deepEqual(turn.usage, { prompt: 5000, completion: 2132 });
+});
+
 test("поток из одних пустых choices остаётся ошибкой", () => {
   assert.throws(() => readTurnText('data: {"choices":[],"cost":"0"}\ndata: [DONE]\n'), /в ответе нет сообщения/);
 });

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ChatMessage } from "./agent.ts";
-import { contextLabel, sessionTitle, sessionsFromSaved, stripImages } from "./chats.ts";
+import { contextLabel, nextContextUsed, sessionTitle, sessionsFromSaved, stripImages } from "./chats.ts";
 
 test("название чата берётся из первой реплики", () => {
   assert.equal(sessionTitle([{ kind: "user", text: "поправь лекцию" }]), "поправь лекцию");
@@ -46,6 +46,12 @@ test("сохранённый размер контекста читается, �
   assert.throws(() => sessionsFromSaved({
     sessions: [{ id: "a", title: "лекция", lines: [], history: [], imagesOmitted: false, contextUsed: "1200" }],
   }), /чат повреждён/);
+});
+
+test("контекст чата растёт, а не сбрасывается на последнее сообщение", () => {
+  assert.equal(nextContextUsed(null, { prompt: 400, completion: 20 }), 420);
+  assert.equal(nextContextUsed(420, { prompt: 500, completion: 30 }), 530);
+  assert.equal(nextContextUsed(530, { prompt: 40, completion: 10 }), 580);
 });
 
 test("подпись счётчика группирует тысячи и не выдумывает окно", () => {

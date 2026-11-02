@@ -1,9 +1,15 @@
 .agent-root {
+  position: relative;
   display: flex;
   flex-direction: column;
+  align-items: stretch;
+  width: 100%;
   height: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
   gap: 8px;
   padding: 8px;
+  box-sizing: border-box;
 }
 
 .agent-root [hidden] {
@@ -181,6 +187,9 @@
   position: relative;
   display: flex;
   flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  box-sizing: border-box;
   gap: 6px;
   border: 1px solid var(--background-modifier-border);
   padding: 8px;
@@ -189,7 +198,7 @@
 .agent-model {
   flex: 0 1 auto;
   min-width: 0;
-  max-width: calc(100% - 48px);
+  max-width: 100%;
   display: flex;
 }
 
@@ -348,6 +357,14 @@
   border-radius: 0;
 }
 
+.workspace-leaf-content[data-type="obsidian-agent"] .view-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  padding: 0;
+}
+
 .workspace-leaf:has(> .workspace-leaf-content[data-type="obsidian-agent"]),
 .workspace-leaf-content[data-type="obsidian-agent"] .view-header,
 .workspace-leaf-content[data-type="obsidian-agent"] .view-content,
@@ -362,7 +379,10 @@
   display: flex;
   gap: 6px;
   align-items: center;
+  width: 100%;
   min-width: 0;
+  box-sizing: border-box;
+  padding-right: 44px;
 }
 
 .agent-composer-bar > .agent-picker {
@@ -370,8 +390,12 @@
   max-width: 42%;
 }
 
-.agent-composer-bar .agent-send {
-  margin-left: auto;
+.agent-root .agent-send.clickable-icon {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 5;
+  margin: 0;
 }
 
 .agent-root .agent-send.clickable-icon,

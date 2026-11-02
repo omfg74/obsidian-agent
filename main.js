@@ -126,12 +126,20 @@ function readTurn(body) {
   };
 }
 function readUsage(value) {
+  const part = readUsagePart(value);
+  if (!part || part.prompt === null || part.completion === null) return null;
+  return { prompt: part.prompt, completion: part.completion };
+}
+function readUsagePart(value) {
   if (value == null || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value;
-  if (!("prompt_tokens" in row) || !("completion_tokens" in row)) return null;
-  const prompt = tokenCount(row.prompt_tokens);
-  const completion = tokenCount(row.completion_tokens);
-  if (prompt === null || completion === null) return null;
+  const hasPrompt = "prompt_tokens" in row;
+  const hasCompletion = "completion_tokens" in row;
+  if (!hasPrompt && !hasCompletion) return null;
+  const prompt = hasPrompt ? tokenCount(row.prompt_tokens) : null;
+  const completion = hasCompletion ? tokenCount(row.completion_tokens) : null;
+  if (hasPrompt && prompt === null) return null;
+  if (hasCompletion && completion === null) return null;
   return { prompt, completion };
 }
 function tokenCount(value) {
@@ -156,7 +164,8 @@ function readEventStream(text) {
   let content = null;
   let finishReason = null;
   let sawChoice = false;
-  let usage = null;
+  let promptTokens = null;
+  let completionTokens = null;
   const calls = /* @__PURE__ */ new Map();
   for (const rawLine of text.split("\n")) {
     const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
@@ -172,8 +181,9 @@ function readEventStream(text) {
     }
     if (!event || typeof event !== "object") throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F");
     const row = event;
-    const parsedUsage = readUsage(row.usage);
-    if (parsedUsage) usage = parsedUsage;
+    const part = readUsagePart(row.usage);
+    if ((part == null ? void 0 : part.prompt) != null) promptTokens = Math.max(promptTokens != null ? promptTokens : 0, part.prompt);
+    if ((part == null ? void 0 : part.completion) != null) completionTokens = Math.max(completionTokens != null ? completionTokens : 0, part.completion);
     if ("error" in row && row.error != null) throw new Error(streamError(row.error));
     if (!("choices" in row)) continue;
     if (!Array.isArray(row.choices)) throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F");
@@ -192,6 +202,7 @@ function readEventStream(text) {
   }
   if (!sawChoice) throw new Error("\u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u043D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F");
   const tool_calls = [...calls.entries()].sort((a, b) => a[0] - b[0]).map(([, call]) => ({ id: call.id, type: "function", function: { name: call.name, arguments: call.arguments } }));
+  const usage = promptTokens === null || completionTokens === null ? null : { prompt: promptTokens, completion: completionTokens };
   return { content, tool_calls: tool_calls.length > 0 ? tool_calls : void 0, finishReason, usage };
 }
 function streamError(error) {
@@ -586,6 +597,12 @@ function contextLabel(used, limit) {
   const text = groupDigits(used);
   if (limit === null) return text;
   return text + " / " + groupDigits(limit);
+}
+function nextContextUsed(used, usage) {
+  const turn = usage.prompt + usage.completion;
+  if (used === null) return turn;
+  if (usage.prompt >= used) return turn;
+  return used + turn;
 }
 function groupDigits(value) {
   return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
@@ -1254,7 +1271,7 @@ var AgentPlugin = class extends import_obsidian.Plugin {
         onLine: (line) => this.push({ kind: "tool", text: line }),
         post: async (batch) => {
           const turn = await this.post(provider, model, batch);
-          session.contextUsed = turn.usage === null ? null : turn.usage.prompt + turn.usage.completion;
+          if (turn.usage !== null) session.contextUsed = nextContextUsed(session.contextUsed, turn.usage);
           this.paint();
           return turn;
         },
@@ -1515,7 +1532,7 @@ var AgentView = class extends import_obsidian.ItemView {
       this.syncModelSelect();
       void this.loadChatModels();
     });
-    this.sendEl = iconButton(bar, "arrow-up", "\u043E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C");
+    this.sendEl = iconButton(root, "arrow-up", "\u043E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C");
     this.sendEl.classList.add("agent-send");
     this.sendEl.addEventListener("click", () => this.onSend());
     this.paint();

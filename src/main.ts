@@ -1,6 +1,6 @@
 import { ItemView, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf, requestUrl, setIcon, setTooltip, type App, type DropdownComponent } from "obsidian";
 import { readTurnText, TOOLS, runAgent, systemPrompt, type ChatMessage } from "./agent.ts";
-import { contextLabel, newSession, sessionTitle, sessionsFromSaved, stripImages, type ChatLine, type Session } from "./chats.ts";
+import { contextLabel, newSession, nextContextUsed, sessionTitle, sessionsFromSaved, stripImages, type ChatLine, type Session } from "./chats.ts";
 import { listedModels, modelMenuLabel, modelNotes, type ListedModel } from "./models.ts";
 import { capacitorOptions, httpRoute, readHttpResult, withDeadline, type HttpInit } from "./http.ts";
 import { assignProviderBase, chatCompletionsUrl, freshSettings, modelsEndpoint, newProviderId, presetById, PROVIDER_PRESETS, providerCanList, providerFromPreset, providerLabel, providerNeedsKey, requestHeaders, settingsFromSaved, type AgentSettings, type Provider } from "./settings.ts";
@@ -254,7 +254,7 @@ export default class AgentPlugin extends Plugin {
         onLine: (line) => this.push({ kind: "tool", text: line }),
         post: async (batch) => {
           const turn = await this.post(provider, model, batch);
-          session.contextUsed = turn.usage === null ? null : turn.usage.prompt + turn.usage.completion;
+          if (turn.usage !== null) session.contextUsed = nextContextUsed(session.contextUsed, turn.usage);
           this.paint();
           return turn;
         },
@@ -513,7 +513,7 @@ class AgentView extends ItemView {
       this.syncModelSelect();
       void this.loadChatModels();
     });
-    this.sendEl = iconButton(bar, "arrow-up", "отправить");
+    this.sendEl = iconButton(root, "arrow-up", "отправить");
     this.sendEl.classList.add("agent-send");
     this.sendEl.addEventListener("click", () => this.onSend());
     this.paint();

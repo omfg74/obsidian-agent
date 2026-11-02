@@ -22,6 +22,13 @@ export function contextLabel(used: number, limit: number | null): string {
   return text + " / " + groupDigits(limit);
 }
 
+export function nextContextUsed(used: number | null, usage: { prompt: number; completion: number }): number {
+  const turn = usage.prompt + usage.completion;
+  if (used === null) return turn;
+  if (usage.prompt >= used) return turn;
+  return used + turn;
+}
+
 function groupDigits(value: number): string {
   return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
 }
