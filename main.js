@@ -54,6 +54,18 @@ var TOOLS = [
   {
     type: "function",
     function: {
+      name: "create_folder",
+      description: "\u0421\u043E\u0437\u0434\u0430\u0442\u044C \u043F\u0430\u043F\u043A\u0443. \u041D\u0435\u0434\u043E\u0441\u0442\u0430\u044E\u0449\u0438\u0435 \u0440\u043E\u0434\u0438\u0442\u0435\u043B\u044C\u0441\u043A\u0438\u0435 \u043F\u0430\u043F\u043A\u0438 \u0442\u043E\u0436\u0435 \u0441\u043E\u0437\u0434\u0430\u0451\u0442.",
+      parameters: {
+        type: "object",
+        properties: { path: { type: "string", description: "\u041F\u0443\u0442\u044C \u043E\u0442 \u043A\u043E\u0440\u043D\u044F \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0430" } },
+        required: ["path"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
       name: "view_image",
       description: "\u041F\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u0442\u044C \u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0443 png, jpeg, gif \u0438\u043B\u0438 webp \u0438\u0437 \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0430.",
       parameters: {
@@ -100,7 +112,7 @@ function systemPrompt(activePath) {
   return [
     "\u0422\u044B \u0430\u0433\u0435\u043D\u0442 \u0432\u043D\u0443\u0442\u0440\u0438 Obsidian. \u0425\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435 \u0441\u043C\u043E\u0442\u0440\u0438 \u0442\u043E\u043B\u044C\u043A\u043E \u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442\u0430\u043C\u0438, \u043D\u0435 \u0432\u044B\u0434\u0443\u043C\u044B\u0432\u0430\u0439 \u0442\u0435\u043A\u0441\u0442 \u0444\u0430\u0439\u043B\u043E\u0432 \u0438 \u043A\u0430\u0440\u0442\u0438\u043D\u043E\u043A.",
     "\u041A\u0430\u0440\u0442\u0438\u043D\u043A\u0443 \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u043E\u0442\u043A\u0440\u043E\u0439 \u0447\u0435\u0440\u0435\u0437 view_image. \u041C\u0430\u043B\u0435\u043D\u044C\u043A\u0443\u044E \u043F\u0440\u0430\u0432\u043A\u0443 \u0434\u0435\u043B\u0430\u0439 \u0447\u0435\u0440\u0435\u0437 search_replace.",
-    "write_note \u043F\u0435\u0440\u0435\u043F\u0438\u0441\u044B\u0432\u0430\u0435\u0442 \u0444\u0430\u0439\u043B \u0446\u0435\u043B\u0438\u043A\u043E\u043C.",
+    "write_note \u043F\u0435\u0440\u0435\u043F\u0438\u0441\u044B\u0432\u0430\u0435\u0442 \u0444\u0430\u0439\u043B \u0446\u0435\u043B\u0438\u043A\u043E\u043C \u0438 \u043D\u0435 \u0441\u043E\u0437\u0434\u0430\u0451\u0442 \u043F\u0430\u043F\u043A\u0443. \u041D\u043E\u0432\u0443\u044E \u043F\u0430\u043F\u043A\u0443 \u0441\u043E\u0437\u0434\u0430\u0439 \u0447\u0435\u0440\u0435\u0437 create_folder: \u043D\u0435\u0434\u043E\u0441\u0442\u0430\u044E\u0449\u0438\u0435 \u0440\u043E\u0434\u0438\u0442\u0435\u043B\u0438 \u043E\u043D \u0441\u043E\u0437\u0434\u0430\u0451\u0442 \u0441\u0430\u043C.",
     where
   ].join("\n");
 }
@@ -983,6 +995,28 @@ var IMAGE_MIME = {
   gif: "image/gif",
   webp: "image/webp"
 };
+function folderPath(raw) {
+  const path = raw.trim().replace(/^\/+/, "").replace(/\/+$/, "");
+  if (!path || path === ".obsidian" || path.startsWith(".obsidian/")) throw new Error("\u0442\u0430\u043A\u043E\u0439 \u043F\u0443\u0442\u044C \u0441\u043E\u0437\u0434\u0430\u0442\u044C \u043D\u0435\u043B\u044C\u0437\u044F");
+  if (path.split("/").some((part) => part === "" || part === "." || part === "..")) throw new Error("\u0442\u0430\u043A\u043E\u0439 \u043F\u0443\u0442\u044C \u0441\u043E\u0437\u0434\u0430\u0442\u044C \u043D\u0435\u043B\u044C\u0437\u044F");
+  return path;
+}
+async function createFolder(fs, raw) {
+  const parts = folderPath(raw).split("/");
+  let current = "";
+  const created = [];
+  for (const part of parts) {
+    current = current ? current + "/" + part : part;
+    const existing = await fs.find(current);
+    if (existing == null ? void 0 : existing.folder) continue;
+    if (existing) throw new Error("\u044D\u0442\u043E \u0444\u0430\u0439\u043B: " + current);
+    await fs.mkdir(current);
+    created.push(current);
+  }
+  if (created.length === 0) throw new Error("\u043F\u0430\u043F\u043A\u0430 \u0443\u0436\u0435 \u0435\u0441\u0442\u044C");
+  if (created.length === 1) return "\u0441\u043E\u0437\u0434\u0430\u043B \u043F\u0430\u043F\u043A\u0443 " + created[0];
+  return "\u0441\u043E\u0437\u0434\u0430\u043B \u043F\u0430\u043F\u043A\u0438 " + created.join(", ");
+}
 function str(args, key) {
   const value = args[key];
   if (typeof value !== "string") throw new Error(key + " \u0434\u043E\u043B\u0436\u0435\u043D \u0431\u044B\u0442\u044C \u0441\u0442\u0440\u043E\u043A\u043E\u0439");
@@ -1023,6 +1057,9 @@ async function dispatchTool(fs, name, args) {
     if (items.length > LIST_LIMIT) throw new Error("\u0432 \u043F\u0430\u043F\u043A\u0435 " + items.length + " \u0437\u0430\u043F\u0438\u0441\u0435\u0439, \u0443\u043A\u0430\u0436\u0438 \u0431\u043E\u043B\u0435\u0435 \u0443\u0437\u043A\u0438\u0439 \u043F\u0443\u0442\u044C");
     if (items.length === 0) return { text: path ? "\u043F\u0443\u0441\u0442\u043E: " + path : "\u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435 \u043F\u0443\u0441\u0442\u043E\u0435" };
     return { text: items.map((item) => item.folder ? item.path + "/" : item.path).join("\n") };
+  }
+  if (name === "create_folder") {
+    return { text: await createFolder(fs, str(args, "path")) };
   }
   if (name === "read_note") {
     const path = await resolvePath(fs, str(args, "path"));
@@ -1390,6 +1427,17 @@ var AgentPlugin = class extends import_obsidian.Plugin {
         if (!folder) throw new Error("\u043D\u0435\u0442 \u043F\u0430\u043F\u043A\u0438 " + path);
         if (!(folder instanceof import_obsidian.TFolder)) throw new Error("\u044D\u0442\u043E \u043D\u0435 \u043F\u0430\u043F\u043A\u0430");
         return folder.children.map((child) => ({ path: child.path, folder: child instanceof import_obsidian.TFolder }));
+      },
+      async mkdir(path) {
+        const existing = app.vault.getAbstractFileByPath(path);
+        if (existing instanceof import_obsidian.TFolder) throw new Error("\u043F\u0430\u043F\u043A\u0430 \u0443\u0436\u0435 \u0435\u0441\u0442\u044C");
+        if (existing) throw new Error("\u044D\u0442\u043E \u0444\u0430\u0439\u043B: " + path);
+        const slash = path.lastIndexOf("/");
+        if (slash > 0) {
+          const parent = path.slice(0, slash);
+          if (!(app.vault.getAbstractFileByPath(parent) instanceof import_obsidian.TFolder)) throw new Error("\u043D\u0435\u0442 \u043F\u0430\u043F\u043A\u0438 " + parent);
+        }
+        await app.vault.createFolder(path);
       }
     };
   }

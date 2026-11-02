@@ -53,6 +53,18 @@ export const TOOLS = [
   {
     type: "function",
     function: {
+      name: "create_folder",
+      description: "Создать папку. Недостающие родительские папки тоже создаёт.",
+      parameters: {
+        type: "object",
+        properties: { path: { type: "string", description: "Путь от корня хранилища" } },
+        required: ["path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "view_image",
       description: "Посмотреть картинку png, jpeg, gif или webp из хранилища.",
       parameters: {
@@ -102,7 +114,7 @@ export function systemPrompt(activePath: string): string {
   return [
     "Ты агент внутри Obsidian. Хранилище смотри только инструментами, не выдумывай текст файлов и картинок.",
     "Картинку сначала открой через view_image. Маленькую правку делай через search_replace.",
-    "write_note переписывает файл целиком.",
+    "write_note переписывает файл целиком и не создаёт папку. Новую папку создай через create_folder: недостающие родители он создаёт сам.",
     where,
   ].join("\n");
 }

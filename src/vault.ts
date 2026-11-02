@@ -21,6 +21,31 @@ export interface VaultFs {
   write(path: string, content: string): Promise<void>;
   bytes(path: string): Promise<Uint8Array>;
   children(path: string): Promise<Listed[]>;
+  mkdir(path: string): Promise<void>;
+}
+
+function folderPath(raw: string): string {
+  const path = raw.trim().replace(/^\/+/, "").replace(/\/+$/, "");
+  if (!path || path === ".obsidian" || path.startsWith(".obsidian/")) throw new Error("такой путь создать нельзя");
+  if (path.split("/").some((part) => part === "" || part === "." || part === "..")) throw new Error("такой путь создать нельзя");
+  return path;
+}
+
+async function createFolder(fs: VaultFs, raw: string): Promise<string> {
+  const parts = folderPath(raw).split("/");
+  let current = "";
+  const created: string[] = [];
+  for (const part of parts) {
+    current = current ? current + "/" + part : part;
+    const existing = await fs.find(current);
+    if (existing?.folder) continue;
+    if (existing) throw new Error("это файл: " + current);
+    await fs.mkdir(current);
+    created.push(current);
+  }
+  if (created.length === 0) throw new Error("папка уже есть");
+  if (created.length === 1) return "создал папку " + created[0];
+  return "создал папки " + created.join(", ");
 }
 
 function str(args: Record<string, unknown>, key: string): string {
@@ -66,6 +91,9 @@ export async function dispatchTool(fs: VaultFs, name: string, args: Record<strin
     if (items.length > LIST_LIMIT) throw new Error("в папке " + items.length + " записей, укажи более узкий путь");
     if (items.length === 0) return { text: path ? "пусто: " + path : "хранилище пустое" };
     return { text: items.map((item) => (item.folder ? item.path + "/" : item.path)).join("\n") };
+  }
+  if (name === "create_folder") {
+    return { text: await createFolder(fs, str(args, "path")) };
   }
   if (name === "read_note") {
     const path = await resolvePath(fs, str(args, "path"));

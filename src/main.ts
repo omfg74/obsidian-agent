@@ -354,6 +354,17 @@ export default class AgentPlugin extends Plugin {
         if (!(folder instanceof TFolder)) throw new Error("это не папка");
         return folder.children.map((child) => ({ path: child.path, folder: child instanceof TFolder }));
       },
+      async mkdir(path) {
+        const existing = app.vault.getAbstractFileByPath(path);
+        if (existing instanceof TFolder) throw new Error("папка уже есть");
+        if (existing) throw new Error("это файл: " + path);
+        const slash = path.lastIndexOf("/");
+        if (slash > 0) {
+          const parent = path.slice(0, slash);
+          if (!(app.vault.getAbstractFileByPath(parent) instanceof TFolder)) throw new Error("нет папки " + parent);
+        }
+        await app.vault.createFolder(path);
+      },
     };
   }
 }

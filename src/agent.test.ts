@@ -8,6 +8,7 @@ test("открытая заметка названа в подсказке", () 
   const prompt = systemPrompt("уг.md");
   assert.match(prompt, /Фокус: уг\.md/);
   assert.match(prompt, /другой файл не создавай/);
+  assert.match(prompt, /create_folder/);
 });
 
 test("replaceOnce меняет одно вхождение", () => {
@@ -47,6 +48,9 @@ function memoryFs(): { fs: VaultFs; files: Map<string, string> } {
         { path: "лекция.md", folder: false },
         { path: "кадр.png", folder: false },
       ];
+    },
+    async mkdir() {
+      throw new Error("нельзя");
     },
   };
   return { fs, files };
@@ -242,6 +246,9 @@ test("неоднозначный путь не выбирает файл сам"
     async children() {
       return [];
     },
+    async mkdir() {
+      throw new Error("нельзя");
+    },
   };
   await assert.rejects(() => resolvePath(fs, "заметка"), /несколько файлов/);
 });
@@ -266,6 +273,55 @@ test("heic не отправляется модели", async () => {
     async children() {
       return [];
     },
+    async mkdir() {
+      throw new Error("нельзя");
+    },
   };
   await assert.rejects(() => dispatchTool(fs, "view_image", { path: "кадр.heic" }), /png, jpeg, gif и webp/);
+});
+
+test("create_folder создаёт недостающих родителей и не затирает файл", async () => {
+  const folders = new Set<string>();
+  const files = new Set<string>(["заметка.md"]);
+  const fs: VaultFs = {
+    async find(path) {
+      if (folders.has(path)) return { path, folder: true };
+      if (files.has(path)) return { path, folder: false };
+      return null;
+    },
+    async findMany() {
+      return [];
+    },
+    async read() {
+      throw new Error("нельзя");
+    },
+    async write() {
+      throw new Error("нельзя");
+    },
+    async bytes() {
+      throw new Error("нельзя");
+    },
+    async children() {
+      return [];
+    },
+    async mkdir(path) {
+      const slash = path.lastIndexOf("/");
+      if (slash > 0 && !folders.has(path.slice(0, slash))) throw new Error("нет папки " + path.slice(0, slash));
+      if (folders.has(path)) throw new Error("папка уже есть");
+      if (files.has(path)) throw new Error("это файл: " + path);
+      folders.add(path);
+    },
+  };
+  const made = await dispatchTool(fs, "create_folder", { path: "/архив/2026/" });
+  assert.equal(made.text, "создал папки архив, архив/2026");
+  assert.deepEqual([...folders], ["архив", "архив/2026"]);
+  const one = await dispatchTool(fs, "create_folder", { path: "архив/2026/май" });
+  assert.equal(one.text, "создал папку архив/2026/май");
+  await assert.rejects(() => dispatchTool(fs, "create_folder", { path: "архив/2026" }), /папка уже есть/);
+  await assert.rejects(() => dispatchTool(fs, "create_folder", { path: "заметка.md" }), /это файл: заметка.md/);
+  await assert.rejects(() => dispatchTool(fs, "create_folder", { path: "заметка.md/внутри" }), /это файл: заметка.md/);
+  await assert.rejects(() => dispatchTool(fs, "create_folder", { path: ".obsidian/plugins" }), /такой путь создать нельзя/);
+  await assert.rejects(() => dispatchTool(fs, "create_folder", { path: "архив/../секрет" }), /такой путь создать нельзя/);
+  await assert.rejects(() => dispatchTool(fs, "create_folder", { path: "архив//черновик" }), /такой путь создать нельзя/);
+  await assert.rejects(() => dispatchTool(fs, "create_folder", { path: "" }), /такой путь создать нельзя/);
 });
