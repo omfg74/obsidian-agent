@@ -409,7 +409,7 @@
 
 .agent-root .agent-send.clickable-icon {
   position: absolute;
-  right: 8px;
+  right: 16px;
   bottom: 36px;
   z-index: 5;
   margin: 0;
