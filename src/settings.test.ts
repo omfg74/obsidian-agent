@@ -162,6 +162,14 @@ test("шаги принимаются до 100 и не выше", () => {
   assert.throws(() => settingsFromSaved({ providers: [], maxSteps: 0 }), /шаги/);
 });
 
+test("режим сохраняется, старые настройки остаются all", () => {
+  assert.equal(settingsFromSaved({ providers: [], maxSteps: 4 }).mode, "all");
+  assert.equal(settingsFromSaved({ providers: [], mode: "chat" }).mode, "chat");
+  assert.equal(settingsFromSaved({ providers: [], mode: "write" }).mode, "write");
+  assert.throws(() => settingsFromSaved({ providers: [], mode: "ask" }), /режим/);
+  assert.throws(() => settingsFromSaved({ providers: [], mode: "" }), /режим/);
+});
+
 test("битый провайдер не превращается в рабочий", () => {
   assert.throws(() => settingsFromSaved({ providers: [{ id: "a" }] }), /повреждён|без /);
   assert.throws(() => settingsFromSaved({

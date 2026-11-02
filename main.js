@@ -107,22 +107,63 @@ var TOOLS = [
     }
   }
 ];
-var READABLE = [
-  "\u041F\u0438\u0448\u0438 \u0442\u0430\u043A, \u0447\u0442\u043E\u0431\u044B \u0442\u0435\u043A\u0441\u0442 \u0447\u0438\u0442\u0430\u043B\u0441\u044F \u0441 \u043F\u0435\u0440\u0432\u043E\u0433\u043E \u0440\u0430\u0437\u0430.",
-  "\u0421\u043D\u0430\u0447\u0430\u043B\u0430 \u0441\u0443\u0442\u044C, \u043F\u043E\u0442\u043E\u043C \u0434\u0435\u0442\u0430\u043B\u0438. \u041A\u043E\u0440\u043E\u0442\u043A\u0438\u0435 \u043F\u0440\u0435\u0434\u043B\u043E\u0436\u0435\u043D\u0438\u044F, \u043F\u0440\u0438\u0432\u044B\u0447\u043D\u044B\u0435 \u0441\u043B\u043E\u0432\u0430, \u043A\u043E\u043D\u043A\u0440\u0435\u0442\u043D\u044B\u0435 \u0433\u043B\u0430\u0433\u043E\u043B\u044B.",
-  "\u0410\u0431\u0437\u0430\u0446 \u2014 \u043E\u0434\u043D\u0430 \u043C\u044B\u0441\u043B\u044C. \u0421\u043F\u0438\u0441\u043E\u043A \u2014 \u0434\u043B\u044F \u043E\u0434\u043D\u043E\u0440\u043E\u0434\u043D\u044B\u0445 \u043F\u0443\u043D\u043A\u0442\u043E\u0432. \u0417\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A \u2014 \u043A\u043E\u0433\u0434\u0430 \u0431\u0435\u0437 \u043D\u0435\u0433\u043E \u0442\u0440\u0443\u0434\u043D\u043E \u043D\u0430\u0439\u0442\u0438 \u043C\u0435\u0441\u0442\u043E.",
-  "\u0427\u0443\u0436\u0443\u044E \u0437\u0430\u043C\u0435\u0442\u043A\u0443 \u043F\u0440\u0430\u0432\u044C \u0432 \u0435\u0451 \u0433\u043E\u043B\u043E\u0441\u0435. \u0424\u043E\u0440\u043C\u0443 \u0438\u0437 \u0437\u0430\u0434\u0430\u043D\u0438\u044F \u0441\u043E\u0445\u0440\u0430\u043D\u044F\u0439.",
-  "\u0412 \u0447\u0430\u0442\u0435 \u043E\u0442\u0432\u0435\u0447\u0430\u0439 \u043A\u043E\u0440\u043E\u0442\u043A\u043E: \u0447\u0442\u043E \u0441\u0434\u0435\u043B\u0430\u043D\u043E \u0438 \u0432 \u043A\u0430\u043A\u043E\u043C \u0444\u0430\u0439\u043B\u0435. \u0421\u043E\u0434\u0435\u0440\u0436\u0430\u043D\u0438\u0435 \u0434\u0435\u0440\u0436\u0438 \u0432 \u0437\u0430\u043C\u0435\u0442\u043A\u0435."
-].join(" ");
-function systemPrompt(activePath) {
-  const where = activePath ? "\u0424\u043E\u043A\u0443\u0441: " + activePath + ". \xAB\u042D\u0442\u043E\u0442 \u0444\u0430\u0439\u043B\xBB, \xAB\u044D\u0442\u0430 \u0437\u0430\u043C\u0435\u0442\u043A\u0430\xBB \u0438 \xAB\u0437\u0434\u0435\u0441\u044C\xBB \u2014 \u044D\u0442\u043E \u043E\u043D. \u0422\u0430\u043A\u043E\u0439 \u0437\u0430\u043F\u0440\u043E\u0441 \u043F\u0440\u0430\u0432\u044C \u0432 \u043D\u0451\u043C, \u0434\u0440\u0443\u0433\u043E\u0439 \u0444\u0430\u0439\u043B \u043D\u0435 \u0441\u043E\u0437\u0434\u0430\u0432\u0430\u0439." : "\u0424\u043E\u043A\u0443\u0441 \u043D\u0435 \u0432\u044B\u0431\u0440\u0430\u043D. \u041D\u0435 \u0432\u044B\u0434\u0443\u043C\u044B\u0432\u0430\u0439 \u043F\u0443\u0442\u044C \u043A \u0444\u0430\u0439\u043B\u0443.";
+var MODE_NAMES = {
+  chat: /* @__PURE__ */ new Set(["read_note", "list_folder", "view_image"]),
+  write: /* @__PURE__ */ new Set(["read_note", "view_image", "search_replace", "write_note"]),
+  all: new Set(TOOLS.map((tool) => tool.function.name))
+};
+function toolsForMode(mode) {
+  const names = MODE_NAMES[mode];
+  return TOOLS.filter((tool) => names.has(tool.function.name));
+}
+function assertModeTool(mode, name) {
+  if (MODE_NAMES[mode].has(name)) return;
+  throw new Error("\u0440\u0435\u0436\u0438\u043C " + mode + " \u043D\u0435 \u0434\u0430\u0451\u0442 " + name);
+}
+function systemPrompt(activePath, mode) {
+  return [modeRules(mode), focusLine(activePath, mode), readable(mode)].join("\n");
+}
+function focusLine(activePath, mode) {
+  if (!activePath) return "\u0424\u043E\u043A\u0443\u0441 \u043D\u0435 \u0432\u044B\u0431\u0440\u0430\u043D. \u041D\u0435 \u0432\u044B\u0434\u0443\u043C\u044B\u0432\u0430\u0439 \u043F\u0443\u0442\u044C \u043A \u0444\u0430\u0439\u043B\u0443.";
+  const who = "\u0424\u043E\u043A\u0443\u0441: " + activePath + ". \xAB\u042D\u0442\u043E\u0442 \u0444\u0430\u0439\u043B\xBB, \xAB\u044D\u0442\u0430 \u0437\u0430\u043C\u0435\u0442\u043A\u0430\xBB \u0438 \xAB\u0437\u0434\u0435\u0441\u044C\xBB \u2014 \u044D\u0442\u043E \u043E\u043D.";
+  if (mode === "chat") return who + " \u041E\u0442\u0432\u0435\u0447\u0430\u0439 \u043F\u0440\u043E \u043D\u0435\u0433\u043E, \u0444\u0430\u0439\u043B \u043D\u0435 \u043C\u0435\u043D\u044F\u0439.";
+  return who + " \u0422\u0430\u043A\u043E\u0439 \u0437\u0430\u043F\u0440\u043E\u0441 \u043F\u0440\u0430\u0432\u044C \u0432 \u043D\u0451\u043C, \u0434\u0440\u0443\u0433\u043E\u0439 \u0444\u0430\u0439\u043B \u043D\u0435 \u0441\u043E\u0437\u0434\u0430\u0432\u0430\u0439.";
+}
+function modeRules(mode) {
+  if (mode === "chat") {
+    return [
+      "\u0422\u044B \u0430\u0433\u0435\u043D\u0442 \u0432\u043D\u0443\u0442\u0440\u0438 Obsidian. \u0420\u0435\u0436\u0438\u043C chat: \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435 \u0442\u043E\u043B\u044C\u043A\u043E \u0447\u0438\u0442\u0430\u0439.",
+      "\u0421\u043C\u043E\u0442\u0440\u0438 \u0444\u0430\u0439\u043B\u044B, \u043F\u0430\u043F\u043A\u0438 \u0438 \u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0438 \u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442\u0430\u043C\u0438, \u043D\u0435 \u0432\u044B\u0434\u0443\u043C\u044B\u0432\u0430\u0439 \u0438\u0445 \u0442\u0435\u043A\u0441\u0442. \u041C\u0435\u043D\u044F\u0442\u044C \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435 \u043D\u0435\u043B\u044C\u0437\u044F."
+    ].join("\n");
+  }
+  if (mode === "write") {
+    return [
+      "\u0422\u044B \u0430\u0433\u0435\u043D\u0442 \u0432\u043D\u0443\u0442\u0440\u0438 Obsidian. \u0420\u0435\u0436\u0438\u043C write: \u0447\u0438\u0442\u0430\u0439 \u0444\u0430\u0439\u043B\u044B \u0438 \u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0438 \u0438 \u043F\u0440\u0430\u0432\u044C \u0442\u0435\u043A\u0441\u0442.",
+      "\u0425\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435 \u0441\u043C\u043E\u0442\u0440\u0438 \u0442\u043E\u043B\u044C\u043A\u043E \u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442\u0430\u043C\u0438, \u043D\u0435 \u0432\u044B\u0434\u0443\u043C\u044B\u0432\u0430\u0439 \u0442\u0435\u043A\u0441\u0442 \u0444\u0430\u0439\u043B\u043E\u0432 \u0438 \u043A\u0430\u0440\u0442\u0438\u043D\u043E\u043A.",
+      "\u041A\u0430\u0440\u0442\u0438\u043D\u043A\u0443 \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u043E\u0442\u043A\u0440\u043E\u0439 \u0447\u0435\u0440\u0435\u0437 view_image. \u041C\u0430\u043B\u0435\u043D\u044C\u043A\u0443\u044E \u043F\u0440\u0430\u0432\u043A\u0443 \u0434\u0435\u043B\u0430\u0439 \u0447\u0435\u0440\u0435\u0437 search_replace.",
+      "write_note \u043F\u0435\u0440\u0435\u043F\u0438\u0441\u044B\u0432\u0430\u0435\u0442 \u0444\u0430\u0439\u043B \u0446\u0435\u043B\u0438\u043A\u043E\u043C \u0438 \u043D\u0435 \u0441\u043E\u0437\u0434\u0430\u0451\u0442 \u043F\u0430\u043F\u043A\u0443. \u0421\u043F\u0438\u0441\u043E\u043A \u043F\u0430\u043F\u043E\u043A \u0438 \u0441\u043E\u0437\u0434\u0430\u043D\u0438\u0435 \u043F\u0430\u043F\u043E\u043A \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u043D\u044B."
+    ].join("\n");
+  }
   return [
-    "\u0422\u044B \u0430\u0433\u0435\u043D\u0442 \u0432\u043D\u0443\u0442\u0440\u0438 Obsidian. \u0425\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435 \u0441\u043C\u043E\u0442\u0440\u0438 \u0442\u043E\u043B\u044C\u043A\u043E \u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442\u0430\u043C\u0438, \u043D\u0435 \u0432\u044B\u0434\u0443\u043C\u044B\u0432\u0430\u0439 \u0442\u0435\u043A\u0441\u0442 \u0444\u0430\u0439\u043B\u043E\u0432 \u0438 \u043A\u0430\u0440\u0442\u0438\u043D\u043E\u043A.",
+    "\u0422\u044B \u0430\u0433\u0435\u043D\u0442 \u0432\u043D\u0443\u0442\u0440\u0438 Obsidian. \u0420\u0435\u0436\u0438\u043C all: \u043C\u043E\u0436\u043D\u043E \u0447\u0438\u0442\u0430\u0442\u044C \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435 \u0438 \u043C\u0435\u043D\u044F\u0442\u044C \u0435\u0433\u043E.",
+    "\u0425\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435 \u0441\u043C\u043E\u0442\u0440\u0438 \u0442\u043E\u043B\u044C\u043A\u043E \u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442\u0430\u043C\u0438, \u043D\u0435 \u0432\u044B\u0434\u0443\u043C\u044B\u0432\u0430\u0439 \u0442\u0435\u043A\u0441\u0442 \u0444\u0430\u0439\u043B\u043E\u0432 \u0438 \u043A\u0430\u0440\u0442\u0438\u043D\u043E\u043A.",
     "\u041A\u0430\u0440\u0442\u0438\u043D\u043A\u0443 \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u043E\u0442\u043A\u0440\u043E\u0439 \u0447\u0435\u0440\u0435\u0437 view_image. \u041C\u0430\u043B\u0435\u043D\u044C\u043A\u0443\u044E \u043F\u0440\u0430\u0432\u043A\u0443 \u0434\u0435\u043B\u0430\u0439 \u0447\u0435\u0440\u0435\u0437 search_replace.",
-    "write_note \u043F\u0435\u0440\u0435\u043F\u0438\u0441\u044B\u0432\u0430\u0435\u0442 \u0444\u0430\u0439\u043B \u0446\u0435\u043B\u0438\u043A\u043E\u043C \u0438 \u043D\u0435 \u0441\u043E\u0437\u0434\u0430\u0451\u0442 \u043F\u0430\u043F\u043A\u0443. \u041D\u043E\u0432\u0443\u044E \u043F\u0430\u043F\u043A\u0443 \u0441\u043E\u0437\u0434\u0430\u0439 \u0447\u0435\u0440\u0435\u0437 create_folder: \u043D\u0435\u0434\u043E\u0441\u0442\u0430\u044E\u0449\u0438\u0435 \u0440\u043E\u0434\u0438\u0442\u0435\u043B\u0438 \u043E\u043D \u0441\u043E\u0437\u0434\u0430\u0451\u0442 \u0441\u0430\u043C.",
-    where,
-    READABLE
+    "write_note \u043F\u0435\u0440\u0435\u043F\u0438\u0441\u044B\u0432\u0430\u0435\u0442 \u0444\u0430\u0439\u043B \u0446\u0435\u043B\u0438\u043A\u043E\u043C \u0438 \u043D\u0435 \u0441\u043E\u0437\u0434\u0430\u0451\u0442 \u043F\u0430\u043F\u043A\u0443. \u041D\u043E\u0432\u0443\u044E \u043F\u0430\u043F\u043A\u0443 \u0441\u043E\u0437\u0434\u0430\u0439 \u0447\u0435\u0440\u0435\u0437 create_folder: \u043D\u0435\u0434\u043E\u0441\u0442\u0430\u044E\u0449\u0438\u0435 \u0440\u043E\u0434\u0438\u0442\u0435\u043B\u0438 \u043E\u043D \u0441\u043E\u0437\u0434\u0430\u0451\u0442 \u0441\u0430\u043C."
   ].join("\n");
+}
+function readable(mode) {
+  const lines = [
+    "\u041F\u0438\u0448\u0438 \u0442\u0430\u043A, \u0447\u0442\u043E\u0431\u044B \u0442\u0435\u043A\u0441\u0442 \u0447\u0438\u0442\u0430\u043B\u0441\u044F \u0441 \u043F\u0435\u0440\u0432\u043E\u0433\u043E \u0440\u0430\u0437\u0430.",
+    "\u0421\u043D\u0430\u0447\u0430\u043B\u0430 \u0441\u0443\u0442\u044C, \u043F\u043E\u0442\u043E\u043C \u0434\u0435\u0442\u0430\u043B\u0438. \u041A\u043E\u0440\u043E\u0442\u043A\u0438\u0435 \u043F\u0440\u0435\u0434\u043B\u043E\u0436\u0435\u043D\u0438\u044F, \u043F\u0440\u0438\u0432\u044B\u0447\u043D\u044B\u0435 \u0441\u043B\u043E\u0432\u0430, \u043A\u043E\u043D\u043A\u0440\u0435\u0442\u043D\u044B\u0435 \u0433\u043B\u0430\u0433\u043E\u043B\u044B.",
+    "\u0410\u0431\u0437\u0430\u0446 \u2014 \u043E\u0434\u043D\u0430 \u043C\u044B\u0441\u043B\u044C. \u0421\u043F\u0438\u0441\u043E\u043A \u2014 \u0434\u043B\u044F \u043E\u0434\u043D\u043E\u0440\u043E\u0434\u043D\u044B\u0445 \u043F\u0443\u043D\u043A\u0442\u043E\u0432. \u0417\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A \u2014 \u043A\u043E\u0433\u0434\u0430 \u0431\u0435\u0437 \u043D\u0435\u0433\u043E \u0442\u0440\u0443\u0434\u043D\u043E \u043D\u0430\u0439\u0442\u0438 \u043C\u0435\u0441\u0442\u043E."
+  ];
+  if (mode === "chat") {
+    lines.push("\u0427\u0443\u0436\u043E\u0439 \u0442\u0435\u043A\u0441\u0442 \u043F\u0435\u0440\u0435\u0441\u043A\u0430\u0437\u044B\u0432\u0430\u0439 \u0432 \u0435\u0433\u043E \u0433\u043E\u043B\u043E\u0441\u0435. \u041E\u0442\u0432\u0435\u0442 \u0434\u0435\u0440\u0436\u0438 \u0432 \u0447\u0430\u0442\u0435.");
+    return lines.join(" ");
+  }
+  lines.push("\u0427\u0443\u0436\u0443\u044E \u0437\u0430\u043C\u0435\u0442\u043A\u0443 \u043F\u0440\u0430\u0432\u044C \u0432 \u0435\u0451 \u0433\u043E\u043B\u043E\u0441\u0435. \u0424\u043E\u0440\u043C\u0443 \u0438\u0437 \u0437\u0430\u0434\u0430\u043D\u0438\u044F \u0441\u043E\u0445\u0440\u0430\u043D\u044F\u0439.");
+  lines.push("\u0412 \u0447\u0430\u0442\u0435 \u043E\u0442\u0432\u0435\u0447\u0430\u0439 \u043A\u043E\u0440\u043E\u0442\u043A\u043E: \u0447\u0442\u043E \u0441\u0434\u0435\u043B\u0430\u043D\u043E \u0438 \u0432 \u043A\u0430\u043A\u043E\u043C \u0444\u0430\u0439\u043B\u0435. \u0421\u043E\u0434\u0435\u0440\u0436\u0430\u043D\u0438\u0435 \u0434\u0435\u0440\u0436\u0438 \u0432 \u0437\u0430\u043C\u0435\u0442\u043A\u0435.");
+  return lines.join(" ");
 }
 var VISIBLE_TOOL = 240;
 function visibleToolResult(name, text) {
@@ -453,11 +494,13 @@ var PROVIDER_PRESETS = [
   }
 ];
 var MAX_STEPS = 100;
+var AGENT_MODES = ["chat", "write", "all"];
 function freshSettings() {
   return {
     providers: [{ id: "openai", name: "OpenAI", base: "https://api.openai.com/v1", key: "", model: "gpt-4o" }],
     activeId: "openai",
-    maxSteps: 8
+    maxSteps: 8,
+    mode: "all"
   };
 }
 function providerLabel(provider) {
@@ -543,10 +586,11 @@ function settingsFromSaved(saved) {
   if (!saved || typeof saved !== "object") return freshSettings();
   const data = saved;
   const maxSteps = readSteps(data.maxSteps);
+  const mode = readMode(data.mode);
   if ("providers" in data) {
     const providers = readProviders(data.providers);
     const activeId = typeof data.activeId === "string" ? data.activeId : "";
-    return { providers, activeId, maxSteps };
+    return { providers, activeId, maxSteps, mode };
   }
   if ("base" in data || "key" in data || "model" in data) {
     const provider = {
@@ -556,9 +600,14 @@ function settingsFromSaved(saved) {
       key: typeof data.key === "string" ? data.key : "",
       model: typeof data.model === "string" ? data.model.trim() : ""
     };
-    return { providers: [provider], activeId: provider.id, maxSteps };
+    return { providers: [provider], activeId: provider.id, maxSteps, mode };
   }
-  return { ...freshSettings(), maxSteps };
+  return { ...freshSettings(), maxSteps, mode };
+}
+function readMode(value) {
+  if (value === void 0) return "all";
+  if (value === "chat" || value === "write" || value === "all") return value;
+  throw new Error("\u0440\u0435\u0436\u0438\u043C \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0430\u0445 \u043F\u043E\u0432\u0440\u0435\u0436\u0434\u0451\u043D");
 }
 function readSteps(value) {
   if (value === void 0) return 8;
@@ -1333,7 +1382,9 @@ var AgentPlugin = class extends import_obsidian.Plugin {
     this.running = true;
     this.stop = false;
     this.paint();
-    const messages = [{ role: "system", content: systemPrompt(active) }, ...session.history.filter((item) => item.role !== "system")];
+    const mode = this.settings.mode;
+    const tools = toolsForMode(mode);
+    const messages = [{ role: "system", content: systemPrompt(active, mode) }, ...session.history.filter((item) => item.role !== "system")];
     try {
       await runAgent({
         messages,
@@ -1341,12 +1392,15 @@ var AgentPlugin = class extends import_obsidian.Plugin {
         shouldStop: () => this.stop,
         onLine: (line) => this.push({ kind: "tool", text: line }),
         post: async (batch) => {
-          const turn = await this.post(provider, model, batch);
+          const turn = await this.post(provider, model, batch, tools);
           if (turn.usage !== null) session.contextUsed = nextContextUsed(session.contextUsed, turn.usage);
           this.paint();
           return turn;
         },
-        callTool: (name, args) => dispatchTool(this.vaultFs(), name, args)
+        callTool: (name, args) => {
+          assertModeTool(mode, name);
+          return dispatchTool(this.vaultFs(), name, args);
+        }
       });
       const last = messages[messages.length - 1];
       const text = (last == null ? void 0 : last.role) === "assistant" && typeof last.content === "string" ? last.content : "";
@@ -1363,12 +1417,12 @@ var AgentPlugin = class extends import_obsidian.Plugin {
       await this.saveSettings();
     }
   }
-  async post(provider, model, messages) {
+  async post(provider, model, messages, tools) {
     const res = await this.callApi(provider, {
       url: chatCompletionsUrl(provider),
       method: "POST",
       headers: requestHeaders(provider, true),
-      body: JSON.stringify({ model, messages, tools: TOOLS, stream: true, stream_options: { include_usage: true } })
+      body: JSON.stringify({ model, messages, tools, stream: true, stream_options: { include_usage: true } })
     });
     if (res.status < 200 || res.status >= 300) {
       const body = res.text.slice(0, 500);
@@ -1489,6 +1543,14 @@ function iconButton(parent, icon, label) {
   });
   return button;
 }
+var MODE_HINT = {
+  chat: "\u0447\u0438\u0442\u0430\u0435\u0442, \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u043F\u0438\u0448\u0435\u0442",
+  write: "\u0447\u0438\u0442\u0430\u0435\u0442 \u0438 \u043F\u0440\u0430\u0432\u0438\u0442 \u0444\u0430\u0439\u043B\u044B",
+  all: "\u0447\u0438\u0442\u0430\u0435\u0442, \u043F\u0440\u0430\u0432\u0438\u0442 \u0444\u0430\u0439\u043B\u044B \u0438 \u043F\u0430\u043F\u043A\u0438"
+};
+function isAgentMode(value) {
+  return value === "chat" || value === "write" || value === "all";
+}
 function modelKey(model) {
   var _a;
   const images = model.images === null ? "" : model.images ? "1" : "0";
@@ -1540,6 +1602,7 @@ var AgentView = class extends import_obsidian.ItemView {
     this.modelLoading = "";
     this.chatEl = null;
     this.chatSignature = "";
+    this.modeEl = null;
     this.noteEl = null;
     this.logRender = null;
     this.logPaint = 0;
@@ -1564,6 +1627,7 @@ var AgentView = class extends import_obsidian.ItemView {
     return "bot";
   }
   async onOpen() {
+    var _a;
     this.plugin.view = this;
     const root = this.contentEl;
     root.empty();
@@ -1576,8 +1640,8 @@ var AgentView = class extends import_obsidian.ItemView {
     chatPicker.createDiv({ cls: "agent-picker-mark", attr: { "aria-hidden": "true" } });
     this.chatEl = chatPicker.createEl("select", { cls: "agent-chat-select", attr: { "aria-label": "\u0447\u0430\u0442" } });
     this.chatEl.addEventListener("change", () => {
-      var _a, _b;
-      const value = (_b = (_a = this.chatEl) == null ? void 0 : _a.value) != null ? _b : "";
+      var _a2, _b;
+      const value = (_b = (_a2 = this.chatEl) == null ? void 0 : _a2.value) != null ? _b : "";
       if (!value) return;
       void this.plugin.openSession(value);
     });
@@ -1604,6 +1668,20 @@ var AgentView = class extends import_obsidian.ItemView {
       this.onSend();
     });
     const bar = composer.createDiv({ cls: "agent-composer-bar" });
+    const modeEl = picker(bar);
+    this.modeEl = modeEl;
+    (_a = modeEl.parentElement) == null ? void 0 : _a.classList.add("agent-mode");
+    modeEl.ariaLabel = "\u0440\u0435\u0436\u0438\u043C";
+    for (const mode of AGENT_MODES) {
+      modeEl.createEl("option", { value: mode, text: mode });
+    }
+    modeEl.addEventListener("change", () => {
+      const value = modeEl.value;
+      if (!isAgentMode(value)) return;
+      this.plugin.settings.mode = value;
+      void this.plugin.saveSettings();
+      this.syncMode();
+    });
     const modelWrap = bar.createDiv({ cls: "agent-model" });
     this.modelTrigger = modelWrap.createDiv({ cls: "agent-picker agent-model-trigger", attr: { role: "button", tabindex: "0" } });
     this.modelLabel = this.modelTrigger.createSpan({ cls: "agent-model-current" });
@@ -1613,10 +1691,10 @@ var AgentView = class extends import_obsidian.ItemView {
       this.syncModelSelect();
     });
     this.modelTrigger.addEventListener("keydown", (event) => {
-      var _a;
+      var _a2;
       if (event.key !== "Enter" && event.key !== " ") return;
       event.preventDefault();
-      (_a = this.modelTrigger) == null ? void 0 : _a.click();
+      (_a2 = this.modelTrigger) == null ? void 0 : _a2.click();
     });
     this.modelMenu = composer.createDiv({ cls: "agent-model-menu", attr: { role: "listbox" } });
     this.modelMenu.hidden = true;
@@ -1653,6 +1731,7 @@ var AgentView = class extends import_obsidian.ItemView {
     }
     this.syncProviderSelect();
     this.syncModelSelect();
+    this.syncMode();
     this.syncChip();
     this.syncMeter();
     this.syncChatSelect();
@@ -1732,6 +1811,16 @@ var AgentView = class extends import_obsidian.ItemView {
     if (!text) return;
     if (this.inputEl) this.inputEl.value = "";
     void this.plugin.ask(text);
+  }
+  syncMode() {
+    const select = this.modeEl;
+    if (!select) return;
+    const mode = this.plugin.settings.mode;
+    if (select.value !== mode) select.value = mode;
+    const hint = MODE_HINT[mode];
+    select.ariaLabel = "\u0440\u0435\u0436\u0438\u043C " + mode + ", " + hint;
+    if (select.parentElement) (0, import_obsidian.setTooltip)(select.parentElement, hint);
+    if (this.inputEl) this.inputEl.placeholder = mode === "chat" ? "\u0412\u043E\u043F\u0440\u043E\u0441" : "\u0417\u0430\u0434\u0430\u043D\u0438\u0435 \u0434\u043B\u044F \u0437\u0430\u043C\u0435\u0442\u043A\u0438 \u0432 \u0444\u043E\u043A\u0443\u0441\u0435";
   }
   syncProviderSelect() {
     const select = this.providerEl;

@@ -169,10 +169,15 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
 
 export const MAX_STEPS = 100;
 
+export const AGENT_MODES = ["chat", "write", "all"] as const;
+
+export type AgentMode = (typeof AGENT_MODES)[number];
+
 export interface AgentSettings {
   providers: Provider[];
   activeId: string;
   maxSteps: number;
+  mode: AgentMode;
 }
 
 export function freshSettings(): AgentSettings {
@@ -180,6 +185,7 @@ export function freshSettings(): AgentSettings {
     providers: [{ id: "openai", name: "OpenAI", base: "https://api.openai.com/v1", key: "", model: "gpt-4o" }],
     activeId: "openai",
     maxSteps: 8,
+    mode: "all",
   };
 }
 
@@ -276,10 +282,11 @@ export function settingsFromSaved(saved: unknown): AgentSettings {
   if (!saved || typeof saved !== "object") return freshSettings();
   const data = saved as Record<string, unknown>;
   const maxSteps = readSteps(data.maxSteps);
+  const mode = readMode(data.mode);
   if ("providers" in data) {
     const providers = readProviders(data.providers);
     const activeId = typeof data.activeId === "string" ? data.activeId : "";
-    return { providers, activeId, maxSteps };
+    return { providers, activeId, maxSteps, mode };
   }
   if ("base" in data || "key" in data || "model" in data) {
     const provider: Provider = {
@@ -289,9 +296,15 @@ export function settingsFromSaved(saved: unknown): AgentSettings {
       key: typeof data.key === "string" ? data.key : "",
       model: typeof data.model === "string" ? data.model.trim() : "",
     };
-    return { providers: [provider], activeId: provider.id, maxSteps };
+    return { providers: [provider], activeId: provider.id, maxSteps, mode };
   }
-  return { ...freshSettings(), maxSteps };
+  return { ...freshSettings(), maxSteps, mode };
+}
+
+function readMode(value: unknown): AgentMode {
+  if (value === undefined) return "all";
+  if (value === "chat" || value === "write" || value === "all") return value;
+  throw new Error("режим в настройках повреждён");
 }
 
 function readSteps(value: unknown): number {

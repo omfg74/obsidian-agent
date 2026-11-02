@@ -1,3 +1,5 @@
+import { type AgentMode } from "./settings.ts";
+
 export type ContentPart =
   | { type: "text"; text: string }
   | { type: "image_url"; image_url: { url: string } };
@@ -107,25 +109,69 @@ export const TOOLS = [
   },
 ];
 
-const READABLE = [
-  "Пиши так, чтобы текст читался с первого раза.",
-  "Сначала суть, потом детали. Короткие предложения, привычные слова, конкретные глаголы.",
-  "Абзац — одна мысль. Список — для однородных пунктов. Заголовок — когда без него трудно найти место.",
-  "Чужую заметку правь в её голосе. Форму из задания сохраняй.",
-  "В чате отвечай коротко: что сделано и в каком файле. Содержание держи в заметке.",
-].join(" ");
+const MODE_NAMES: Record<AgentMode, ReadonlySet<string>> = {
+  chat: new Set(["read_note", "list_folder", "view_image"]),
+  write: new Set(["read_note", "view_image", "search_replace", "write_note"]),
+  all: new Set(TOOLS.map((tool) => tool.function.name)),
+};
 
-export function systemPrompt(activePath: string): string {
-  const where = activePath
-    ? "Фокус: " + activePath + ". «Этот файл», «эта заметка» и «здесь» — это он. Такой запрос правь в нём, другой файл не создавай."
-    : "Фокус не выбран. Не выдумывай путь к файлу.";
+export function toolsForMode(mode: AgentMode) {
+  const names = MODE_NAMES[mode];
+  return TOOLS.filter((tool) => names.has(tool.function.name));
+}
+
+export function assertModeTool(mode: AgentMode, name: string): void {
+  if (MODE_NAMES[mode].has(name)) return;
+  throw new Error("режим " + mode + " не даёт " + name);
+}
+
+export function systemPrompt(activePath: string, mode: AgentMode): string {
+  return [modeRules(mode), focusLine(activePath, mode), readable(mode)].join("\n");
+}
+
+function focusLine(activePath: string, mode: AgentMode): string {
+  if (!activePath) return "Фокус не выбран. Не выдумывай путь к файлу.";
+  const who = "Фокус: " + activePath + ". «Этот файл», «эта заметка» и «здесь» — это он.";
+  if (mode === "chat") return who + " Отвечай про него, файл не меняй.";
+  return who + " Такой запрос правь в нём, другой файл не создавай.";
+}
+
+function modeRules(mode: AgentMode): string {
+  if (mode === "chat") {
+    return [
+      "Ты агент внутри Obsidian. Режим chat: хранилище только читай.",
+      "Смотри файлы, папки и картинки инструментами, не выдумывай их текст. Менять хранилище нельзя.",
+    ].join("\n");
+  }
+  if (mode === "write") {
+    return [
+      "Ты агент внутри Obsidian. Режим write: читай файлы и картинки и правь текст.",
+      "Хранилище смотри только инструментами, не выдумывай текст файлов и картинок.",
+      "Картинку сначала открой через view_image. Маленькую правку делай через search_replace.",
+      "write_note переписывает файл целиком и не создаёт папку. Список папок и создание папок недоступны.",
+    ].join("\n");
+  }
   return [
-    "Ты агент внутри Obsidian. Хранилище смотри только инструментами, не выдумывай текст файлов и картинок.",
+    "Ты агент внутри Obsidian. Режим all: можно читать хранилище и менять его.",
+    "Хранилище смотри только инструментами, не выдумывай текст файлов и картинок.",
     "Картинку сначала открой через view_image. Маленькую правку делай через search_replace.",
     "write_note переписывает файл целиком и не создаёт папку. Новую папку создай через create_folder: недостающие родители он создаёт сам.",
-    where,
-    READABLE,
   ].join("\n");
+}
+
+function readable(mode: AgentMode): string {
+  const lines = [
+    "Пиши так, чтобы текст читался с первого раза.",
+    "Сначала суть, потом детали. Короткие предложения, привычные слова, конкретные глаголы.",
+    "Абзац — одна мысль. Список — для однородных пунктов. Заголовок — когда без него трудно найти место.",
+  ];
+  if (mode === "chat") {
+    lines.push("Чужой текст пересказывай в его голосе. Ответ держи в чате.");
+    return lines.join(" ");
+  }
+  lines.push("Чужую заметку правь в её голосе. Форму из задания сохраняй.");
+  lines.push("В чате отвечай коротко: что сделано и в каком файле. Содержание держи в заметке.");
+  return lines.join(" ");
 }
 
 const VISIBLE_TOOL = 240;

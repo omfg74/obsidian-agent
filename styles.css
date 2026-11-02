@@ -407,6 +407,11 @@
   max-width: 42%;
 }
 
+.agent-composer-bar > .agent-mode {
+  flex: none;
+  width: 74px;
+}
+
 .agent-root .agent-send.clickable-icon {
   position: absolute;
   right: 16px;

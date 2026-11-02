@@ -1,9 +1,9 @@
 import { Component, ItemView, MarkdownRenderer, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf, requestUrl, setIcon, setTooltip, type App, type Debouncer, type DropdownComponent } from "obsidian";
-import { readTurnText, TOOLS, runAgent, systemPrompt, type ChatMessage } from "./agent.ts";
+import { assertModeTool, readTurnText, runAgent, systemPrompt, toolsForMode, type ChatMessage } from "./agent.ts";
 import { contextLabel, newSession, nextContextUsed, sessionTitle, sessionsFromSaved, stripImages, type ChatLine, type Session } from "./chats.ts";
 import { listedModels, modelMenuLabel, modelNotes, type ListedModel } from "./models.ts";
 import { capacitorOptions, httpRoute, readHttpResult, withDeadline, type HttpInit } from "./http.ts";
-import { assignProviderBase, chatCompletionsUrl, freshSettings, MAX_STEPS, modelsEndpoint, newProviderId, presetById, PROVIDER_PRESETS, providerCanList, providerFromPreset, providerLabel, providerNeedsKey, requestHeaders, settingsFromSaved, type AgentSettings, type Provider } from "./settings.ts";
+import { AGENT_MODES, assignProviderBase, chatCompletionsUrl, freshSettings, MAX_STEPS, modelsEndpoint, newProviderId, presetById, PROVIDER_PRESETS, providerCanList, providerFromPreset, providerLabel, providerNeedsKey, requestHeaders, settingsFromSaved, type AgentMode, type AgentSettings, type Provider } from "./settings.ts";
 import { readOpenNote, writeOpenNote, type OpenEditor } from "./note-write.ts";
 import { dispatchTool, type VaultFs } from "./vault.ts";
 
@@ -246,7 +246,9 @@ export default class AgentPlugin extends Plugin {
     this.running = true;
     this.stop = false;
     this.paint();
-    const messages: ChatMessage[] = [{ role: "system", content: systemPrompt(active) }, ...session.history.filter((item) => item.role !== "system")];
+    const mode = this.settings.mode;
+    const tools = toolsForMode(mode);
+    const messages: ChatMessage[] = [{ role: "system", content: systemPrompt(active, mode) }, ...session.history.filter((item) => item.role !== "system")];
     try {
       await runAgent({
         messages,
@@ -254,12 +256,15 @@ export default class AgentPlugin extends Plugin {
         shouldStop: () => this.stop,
         onLine: (line) => this.push({ kind: "tool", text: line }),
         post: async (batch) => {
-          const turn = await this.post(provider, model, batch);
+          const turn = await this.post(provider, model, batch, tools);
           if (turn.usage !== null) session.contextUsed = nextContextUsed(session.contextUsed, turn.usage);
           this.paint();
           return turn;
         },
-        callTool: (name, args) => dispatchTool(this.vaultFs(), name, args),
+        callTool: (name, args) => {
+          assertModeTool(mode, name);
+          return dispatchTool(this.vaultFs(), name, args);
+        },
       });
       const last = messages[messages.length - 1];
       const text = last?.role === "assistant" && typeof last.content === "string" ? last.content : "";
@@ -277,12 +282,12 @@ export default class AgentPlugin extends Plugin {
     }
   }
 
-  private async post(provider: Provider, model: string, messages: ChatMessage[]) {
+  private async post(provider: Provider, model: string, messages: ChatMessage[], tools: ReturnType<typeof toolsForMode>) {
     const res = await this.callApi(provider, {
       url: chatCompletionsUrl(provider),
       method: "POST",
       headers: requestHeaders(provider, true),
-      body: JSON.stringify({ model, messages, tools: TOOLS, stream: true, stream_options: { include_usage: true } }),
+      body: JSON.stringify({ model, messages, tools, stream: true, stream_options: { include_usage: true } }),
     });
     if (res.status < 200 || res.status >= 300) {
       const body = res.text.slice(0, 500);
@@ -408,6 +413,16 @@ function iconButton(parent: HTMLElement, icon: string, label: string): HTMLEleme
   return button;
 }
 
+const MODE_HINT: Record<AgentMode, string> = {
+  chat: "читает, ничего не пишет",
+  write: "читает и правит файлы",
+  all: "читает, правит файлы и папки",
+};
+
+function isAgentMode(value: string | undefined): value is AgentMode {
+  return value === "chat" || value === "write" || value === "all";
+}
+
 function modelKey(model: ListedModel): string {
   const images = model.images === null ? "" : model.images ? "1" : "0";
   return model.id + "\0" + (model.pay ?? "") + "\0" + images;
@@ -459,6 +474,7 @@ class AgentView extends ItemView {
   modelLoading = "";
   chatEl: HTMLSelectElement | null = null;
   chatSignature = "";
+  modeEl: HTMLSelectElement | null = null;
   noteEl: HTMLElement | null = null;
   logRender: Component | null = null;
   logPaint = 0;
@@ -520,6 +536,20 @@ class AgentView extends ItemView {
       this.onSend();
     });
     const bar = composer.createDiv({ cls: "agent-composer-bar" });
+    const modeEl = picker(bar);
+    this.modeEl = modeEl;
+    modeEl.parentElement?.classList.add("agent-mode");
+    modeEl.ariaLabel = "режим";
+    for (const mode of AGENT_MODES) {
+      modeEl.createEl("option", { value: mode, text: mode });
+    }
+    modeEl.addEventListener("change", () => {
+      const value = modeEl.value;
+      if (!isAgentMode(value)) return;
+      this.plugin.settings.mode = value;
+      void this.plugin.saveSettings();
+      this.syncMode();
+    });
     const modelWrap = bar.createDiv({ cls: "agent-model" });
     this.modelTrigger = modelWrap.createDiv({ cls: "agent-picker agent-model-trigger", attr: { role: "button", tabindex: "0" } });
     this.modelLabel = this.modelTrigger.createSpan({ cls: "agent-model-current" });
@@ -578,6 +608,7 @@ class AgentView extends ItemView {
     }
     this.syncProviderSelect();
     this.syncModelSelect();
+    this.syncMode();
     this.syncChip();
     this.syncMeter();
     this.syncChatSelect();
@@ -663,6 +694,17 @@ class AgentView extends ItemView {
     if (!text) return;
     if (this.inputEl) this.inputEl.value = "";
     void this.plugin.ask(text);
+  }
+
+  private syncMode() {
+    const select = this.modeEl;
+    if (!select) return;
+    const mode = this.plugin.settings.mode;
+    if (select.value !== mode) select.value = mode;
+    const hint = MODE_HINT[mode];
+    select.ariaLabel = "режим " + mode + ", " + hint;
+    if (select.parentElement) setTooltip(select.parentElement, hint);
+    if (this.inputEl) this.inputEl.placeholder = mode === "chat" ? "Вопрос" : "Задание для заметки в фокусе";
   }
 
   private syncProviderSelect() {

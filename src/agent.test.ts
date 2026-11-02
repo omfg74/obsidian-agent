@@ -1,16 +1,38 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readTurn, readTurnText, runAgent, systemPrompt, visibleToolResult } from "./agent.ts";
+import { assertModeTool, readTurn, readTurnText, runAgent, systemPrompt, TOOLS, toolsForMode, visibleToolResult } from "./agent.ts";
 import { replaceOnce } from "./replace.ts";
 import { dispatchTool, resolvePath, type VaultFs } from "./vault.ts";
 
 test("открытая заметка названа в подсказке", () => {
-  const prompt = systemPrompt("уг.md");
+  const prompt = systemPrompt("уг.md", "all");
   assert.match(prompt, /Фокус: уг\.md/);
   assert.match(prompt, /другой файл не создавай/);
   assert.match(prompt, /create_folder/);
   assert.match(prompt, /читался с первого раза/);
   assert.match(prompt, /Содержание держи в заметке/);
+});
+
+test("режим ограничивает инструменты", () => {
+  const names = (mode: "chat" | "write" | "all") => toolsForMode(mode).map((tool) => tool.function.name);
+  assert.deepEqual(names("chat"), ["read_note", "list_folder", "view_image"]);
+  assert.deepEqual(names("write"), ["read_note", "view_image", "search_replace", "write_note"]);
+  assert.deepEqual(toolsForMode("all"), TOOLS);
+  assert.throws(() => assertModeTool("chat", "write_note"), /режим chat не даёт write_note/);
+  assert.throws(() => assertModeTool("write", "create_folder"), /режим write не даёт create_folder/);
+  assert.doesNotThrow(() => assertModeTool("all", "create_folder"));
+});
+
+test("подсказка режима говорит, что можно", () => {
+  const chat = systemPrompt("", "chat");
+  assert.match(chat, /Режим chat/);
+  assert.match(chat, /Менять хранилище нельзя/);
+  assert.doesNotMatch(chat, /Содержание держи в заметке/);
+  const write = systemPrompt("а.md", "write");
+  assert.match(write, /Режим write/);
+  assert.match(write, /создание папок недоступны/);
+  assert.match(write, /Фокус: а\.md/);
+  assert.match(systemPrompt("", "all"), /Режим all/);
 });
 
 test("replaceOnce меняет одно вхождение", () => {
@@ -64,7 +86,7 @@ test("агент смотрит картинку и правит текст", as
   let step = 0;
   const messages = await runAgent({
     messages: [
-      { role: "system", content: systemPrompt("лекция.md") },
+      { role: "system", content: systemPrompt("лекция.md", "all") },
       { role: "user", content: "посмотри кадр и поправь лекцию" },
     ],
     maxSteps: 6,
