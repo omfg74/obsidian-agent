@@ -938,6 +938,30 @@ function httpPlugin(value) {
   };
 }
 
+// src/note-write.ts
+async function readOpenNote(editors, stored) {
+  const source = editors.filter((editor) => editor.mode === "source");
+  if (source.length === 0) return stored;
+  const text = source[0].get();
+  for (const editor of source.slice(1)) {
+    if (editor.get() !== text) throw new Error("\u0437\u0430\u043C\u0435\u0442\u043A\u0430 \u043E\u0442\u043A\u0440\u044B\u0442\u0430 \u0432 \u043D\u0435\u0441\u043A\u043E\u043B\u044C\u043A\u0438\u0445 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u0430\u0445 \u0441 \u0440\u0430\u0437\u043D\u044B\u043C \u0442\u0435\u043A\u0441\u0442\u043E\u043C");
+  }
+  return text;
+}
+async function writeOpenNote(editors, store, content) {
+  const source = editors.filter((editor) => editor.mode === "source");
+  if (source.length === 0) {
+    await store.modify(content);
+  } else {
+    for (const editor of source) editor.cancelPending();
+    for (const editor of source) editor.set(content);
+    for (const editor of source) await editor.save();
+  }
+  if (await store.read() === content) return;
+  await store.modify(content);
+  if (await store.read() !== content) throw new Error("\u0444\u0430\u0439\u043B \u043D\u0435 \u0441\u043E\u0445\u0440\u0430\u043D\u0438\u043B\u0441\u044F");
+}
+
 // src/replace.ts
 function replaceOnce(text, oldStr, newStr) {
   if (oldStr === "") throw new Error("\u043F\u0443\u0441\u0442\u043E\u0439 \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442 \u0434\u043B\u044F \u0437\u0430\u043C\u0435\u043D\u044B");
@@ -1340,21 +1364,13 @@ var AgentPlugin = class extends import_obsidian.Plugin {
       async read(path) {
         const file = app.vault.getAbstractFileByPath(path);
         if (!(file instanceof import_obsidian.TFile)) throw new Error("\u043D\u0435\u0442 \u0444\u0430\u0439\u043B\u0430 " + path);
-        return app.vault.read(file);
+        return readOpenNote(openEditors(app, path), await app.vault.read(file));
       },
       async write(path, content) {
         const file = app.vault.getAbstractFileByPath(path);
         if (file instanceof import_obsidian.TFolder) throw new Error("\u044D\u0442\u043E \u043F\u0430\u043F\u043A\u0430");
         if (file instanceof import_obsidian.TFile) {
-          const view = app.workspace.getLeavesOfType("markdown").map((leaf) => leaf.view).find((item) => {
-            var _a;
-            return item instanceof import_obsidian.MarkdownView && ((_a = item.file) == null ? void 0 : _a.path) === path;
-          });
-          if (view) {
-            view.editor.setValue(content);
-            return;
-          }
-          await app.vault.modify(file, content);
+          await writeOpenNote(openEditors(app, path), { read: () => app.vault.read(file), modify: (data) => app.vault.modify(file, data) }, content);
           return;
         }
         const slash = path.lastIndexOf("/");
@@ -1378,6 +1394,29 @@ var AgentPlugin = class extends import_obsidian.Plugin {
     };
   }
 };
+function openEditors(app, path) {
+  var _a;
+  const editors = [];
+  for (const leaf of app.workspace.getLeavesOfType("markdown")) {
+    const view = leaf.view;
+    if (!(view instanceof import_obsidian.MarkdownView) || ((_a = view.file) == null ? void 0 : _a.path) !== path) continue;
+    const mode = view.getMode();
+    if (mode !== "source" && mode !== "preview") throw new Error("\u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u044B\u0439 \u0440\u0435\u0436\u0438\u043C \u0437\u0430\u043C\u0435\u0442\u043A\u0438");
+    editors.push({
+      mode,
+      get: () => view.editor.getValue(),
+      set: (content) => view.editor.setValue(content),
+      cancelPending: () => cancelPendingSave(view),
+      save: () => view.save()
+    });
+  }
+  return editors;
+}
+function cancelPendingSave(view) {
+  const save = view.requestSave;
+  if (typeof save.cancel !== "function") throw new Error("\u043E\u0442\u043B\u043E\u0436\u0435\u043D\u043D\u0430\u044F \u0437\u0430\u043F\u0438\u0441\u044C \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u0430 \u043D\u0435 \u043E\u0442\u043C\u0435\u043D\u044F\u0435\u0442\u0441\u044F");
+  save.cancel();
+}
 function iconButton(parent, icon, label) {
   const button = parent.createDiv({
     cls: "clickable-icon agent-icon",

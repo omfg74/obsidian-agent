@@ -1,9 +1,10 @@
-import { Component, ItemView, MarkdownRenderer, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf, requestUrl, setIcon, setTooltip, type App, type DropdownComponent } from "obsidian";
+import { Component, ItemView, MarkdownRenderer, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf, requestUrl, setIcon, setTooltip, type App, type Debouncer, type DropdownComponent } from "obsidian";
 import { readTurnText, TOOLS, runAgent, systemPrompt, type ChatMessage } from "./agent.ts";
 import { contextLabel, newSession, nextContextUsed, sessionTitle, sessionsFromSaved, stripImages, type ChatLine, type Session } from "./chats.ts";
 import { listedModels, modelMenuLabel, modelNotes, type ListedModel } from "./models.ts";
 import { capacitorOptions, httpRoute, readHttpResult, withDeadline, type HttpInit } from "./http.ts";
 import { assignProviderBase, chatCompletionsUrl, freshSettings, modelsEndpoint, newProviderId, presetById, PROVIDER_PRESETS, providerCanList, providerFromPreset, providerLabel, providerNeedsKey, requestHeaders, settingsFromSaved, type AgentSettings, type Provider } from "./settings.ts";
+import { readOpenNote, writeOpenNote, type OpenEditor } from "./note-write.ts";
 import { dispatchTool, type VaultFs } from "./vault.ts";
 
 const VIEW = "obsidian-agent";
@@ -326,18 +327,13 @@ export default class AgentPlugin extends Plugin {
       async read(path) {
         const file = app.vault.getAbstractFileByPath(path);
         if (!(file instanceof TFile)) throw new Error("нет файла " + path);
-        return app.vault.read(file);
+        return readOpenNote(openEditors(app, path), await app.vault.read(file));
       },
       async write(path, content) {
         const file = app.vault.getAbstractFileByPath(path);
         if (file instanceof TFolder) throw new Error("это папка");
         if (file instanceof TFile) {
-          const view = app.workspace.getLeavesOfType("markdown").map((leaf) => leaf.view).find((item): item is MarkdownView => item instanceof MarkdownView && item.file?.path === path);
-          if (view) {
-            view.editor.setValue(content);
-            return;
-          }
-          await app.vault.modify(file, content);
+          await writeOpenNote(openEditors(app, path), { read: () => app.vault.read(file), modify: (data) => app.vault.modify(file, data) }, content);
           return;
         }
         const slash = path.lastIndexOf("/");
@@ -360,6 +356,30 @@ export default class AgentPlugin extends Plugin {
       },
     };
   }
+}
+
+function openEditors(app: App, path: string): OpenEditor[] {
+  const editors: OpenEditor[] = [];
+  for (const leaf of app.workspace.getLeavesOfType("markdown")) {
+    const view = leaf.view;
+    if (!(view instanceof MarkdownView) || view.file?.path !== path) continue;
+    const mode = view.getMode();
+    if (mode !== "source" && mode !== "preview") throw new Error("неизвестный режим заметки");
+    editors.push({
+      mode,
+      get: () => view.editor.getValue(),
+      set: (content) => view.editor.setValue(content),
+      cancelPending: () => cancelPendingSave(view),
+      save: () => view.save(),
+    });
+  }
+  return editors;
+}
+
+function cancelPendingSave(view: MarkdownView) {
+  const save = view.requestSave as Debouncer<[], Promise<void>>;
+  if (typeof save.cancel !== "function") throw new Error("отложенная запись редактора не отменяется");
+  save.cancel();
 }
 
 function iconButton(parent: HTMLElement, icon: string, label: string): HTMLElement {
