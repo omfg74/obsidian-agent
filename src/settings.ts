@@ -215,6 +215,7 @@ export function providerFromPreset(preset: ProviderPreset, id: string): Provider
     key: "",
     model: "",
     preset: preset.id,
+    timeout: 600,
   };
   if (preset.access === "open") provider.access = "open";
   if (preset.modelsBase) provider.modelsBase = preset.modelsBase;
