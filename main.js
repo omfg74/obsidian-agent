@@ -1444,6 +1444,8 @@ var AgentView = class extends import_obsidian.ItemView {
     this.chatEl = null;
     this.chatSignature = "";
     this.noteEl = null;
+    this.logRender = null;
+    this.logPaint = 0;
     this.closeModelMenu = (event) => {
       var _a, _b;
       if (!this.modelOpen) return;
@@ -1538,6 +1540,7 @@ var AgentView = class extends import_obsidian.ItemView {
     this.paint();
   }
   async onClose() {
+    this.clearLogRender();
     document.removeEventListener("pointerdown", this.closeModelMenu);
     if (this.plugin.view === this) this.plugin.view = null;
   }
@@ -1564,24 +1567,63 @@ var AgentView = class extends import_obsidian.ItemView {
       this.noteEl.hidden = !(session == null ? void 0 : session.imagesOmitted);
       this.noteEl.setText((session == null ? void 0 : session.imagesOmitted) ? "\u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0438 \u044D\u0442\u043E\u0433\u043E \u0447\u0430\u0442\u0430 \u043D\u0435 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u044B, \u043C\u043E\u0434\u0435\u043B\u044C \u0438\u0445 \u043D\u0435 \u0432\u0438\u0434\u0438\u0442" : "");
     }
+    this.clearLogRender();
     this.logEl.empty();
+    const paintId = ++this.logPaint;
+    const pending = [];
     if (session) {
       for (const line of session.lines) {
-        const entry = this.logEl.createDiv({ cls: "agent-entry" });
-        entry.createDiv({ cls: "agent-line agent-" + line.kind, text: line.text });
-        if ((line.kind === "user" || line.kind === "assistant") && line.text) {
-          const actions = entry.createDiv({ cls: "agent-actions" });
-          iconButton(actions, "copy", "\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C").addEventListener("click", () => void copyLine(line.text));
-        }
+        const rendered = this.appendLine(this.logEl, line, paintId);
+        if (rendered) pending.push(rendered);
       }
     }
     if (this.plugin.running) this.logEl.createDiv({ cls: "agent-spin", attr: { "aria-label": "\u0430\u0433\u0435\u043D\u0442 \u0440\u0430\u0431\u043E\u0442\u0430\u0435\u0442" } });
     this.logEl.scrollTop = this.logEl.scrollHeight;
+    if (pending.length > 0) {
+      void Promise.all(pending).then(() => {
+        if (paintId !== this.logPaint || !this.logEl) return;
+        this.logEl.scrollTop = this.logEl.scrollHeight;
+      });
+    }
     const sending = this.plugin.running;
     const sendLabel = sending ? "\u0441\u0442\u043E\u043F" : "\u043E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C";
     (0, import_obsidian.setIcon)(this.sendEl, sending ? "square" : "arrow-up");
     this.sendEl.ariaLabel = sendLabel;
     (0, import_obsidian.setTooltip)(this.sendEl, sendLabel);
+  }
+  clearLogRender() {
+    if (!this.logRender) return;
+    this.removeChild(this.logRender);
+    this.logRender = null;
+  }
+  appendLine(parent, line, paintId) {
+    const entry = parent.createDiv({ cls: "agent-entry" });
+    if (line.kind === "assistant" && line.text) {
+      const body = entry.createDiv({ cls: "agent-line agent-assistant markdown-rendered" });
+      const rendered = this.renderAssistant(body, line.text, paintId);
+      this.appendCopy(entry, line.text);
+      return rendered;
+    }
+    entry.createDiv({ cls: "agent-line agent-" + line.kind, text: line.text });
+    if (line.kind === "user" && line.text) this.appendCopy(entry, line.text);
+    return null;
+  }
+  appendCopy(entry, text) {
+    const actions = entry.createDiv({ cls: "agent-actions" });
+    iconButton(actions, "copy", "\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C").addEventListener("click", () => void copyLine(text));
+  }
+  renderAssistant(body, text, paintId) {
+    if (!this.logRender) this.logRender = this.addChild(new import_obsidian.Component());
+    const render = this.logRender;
+    return Promise.resolve().then(() => import_obsidian.MarkdownRenderer.render(this.app, text, body, this.plugin.focusPath, render)).then(
+      () => void 0,
+      () => {
+        if (paintId !== this.logPaint || !body.isConnected) return;
+        body.classList.remove("markdown-rendered");
+        body.empty();
+        body.setText(text);
+      }
+    );
   }
   onSend() {
     var _a, _b;

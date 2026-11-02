@@ -1,4 +1,4 @@
-import { ItemView, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf, requestUrl, setIcon, setTooltip, type App, type DropdownComponent } from "obsidian";
+import { Component, ItemView, MarkdownRenderer, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf, requestUrl, setIcon, setTooltip, type App, type DropdownComponent } from "obsidian";
 import { readTurnText, TOOLS, runAgent, systemPrompt, type ChatMessage } from "./agent.ts";
 import { contextLabel, newSession, nextContextUsed, sessionTitle, sessionsFromSaved, stripImages, type ChatLine, type Session } from "./chats.ts";
 import { listedModels, modelMenuLabel, modelNotes, type ListedModel } from "./models.ts";
@@ -429,6 +429,8 @@ class AgentView extends ItemView {
   chatEl: HTMLSelectElement | null = null;
   chatSignature = "";
   noteEl: HTMLElement | null = null;
+  logRender: Component | null = null;
+  logPaint = 0;
 
   constructor(leaf: WorkspaceLeaf, plugin: AgentPlugin) {
     super(leaf);
@@ -520,6 +522,7 @@ class AgentView extends ItemView {
   }
 
   async onClose() {
+    this.clearLogRender();
     document.removeEventListener("pointerdown", this.closeModelMenu);
     if (this.plugin.view === this) this.plugin.view = null;
   }
@@ -555,24 +558,69 @@ class AgentView extends ItemView {
       this.noteEl.hidden = !session?.imagesOmitted;
       this.noteEl.setText(session?.imagesOmitted ? "картинки этого чата не сохранены, модель их не видит" : "");
     }
+    this.clearLogRender();
     this.logEl.empty();
+    const paintId = ++this.logPaint;
+    const pending: Promise<void>[] = [];
     if (session) {
       for (const line of session.lines) {
-        const entry = this.logEl.createDiv({ cls: "agent-entry" });
-        entry.createDiv({ cls: "agent-line agent-" + line.kind, text: line.text });
-        if ((line.kind === "user" || line.kind === "assistant") && line.text) {
-          const actions = entry.createDiv({ cls: "agent-actions" });
-          iconButton(actions, "copy", "копировать").addEventListener("click", () => void copyLine(line.text));
-        }
+        const rendered = this.appendLine(this.logEl, line, paintId);
+        if (rendered) pending.push(rendered);
       }
     }
     if (this.plugin.running) this.logEl.createDiv({ cls: "agent-spin", attr: { "aria-label": "агент работает" } });
     this.logEl.scrollTop = this.logEl.scrollHeight;
+    if (pending.length > 0) {
+      void Promise.all(pending).then(() => {
+        if (paintId !== this.logPaint || !this.logEl) return;
+        this.logEl.scrollTop = this.logEl.scrollHeight;
+      });
+    }
     const sending = this.plugin.running;
     const sendLabel = sending ? "стоп" : "отправить";
     setIcon(this.sendEl, sending ? "square" : "arrow-up");
     this.sendEl.ariaLabel = sendLabel;
     setTooltip(this.sendEl, sendLabel);
+  }
+
+  private clearLogRender() {
+    if (!this.logRender) return;
+    this.removeChild(this.logRender);
+    this.logRender = null;
+  }
+
+  private appendLine(parent: HTMLElement, line: ChatLine, paintId: number): Promise<void> | null {
+    const entry = parent.createDiv({ cls: "agent-entry" });
+    if (line.kind === "assistant" && line.text) {
+      const body = entry.createDiv({ cls: "agent-line agent-assistant markdown-rendered" });
+      const rendered = this.renderAssistant(body, line.text, paintId);
+      this.appendCopy(entry, line.text);
+      return rendered;
+    }
+    entry.createDiv({ cls: "agent-line agent-" + line.kind, text: line.text });
+    if (line.kind === "user" && line.text) this.appendCopy(entry, line.text);
+    return null;
+  }
+
+  private appendCopy(entry: HTMLElement, text: string) {
+    const actions = entry.createDiv({ cls: "agent-actions" });
+    iconButton(actions, "copy", "копировать").addEventListener("click", () => void copyLine(text));
+  }
+
+  private renderAssistant(body: HTMLElement, text: string, paintId: number): Promise<void> {
+    if (!this.logRender) this.logRender = this.addChild(new Component());
+    const render = this.logRender;
+    return Promise.resolve()
+      .then(() => MarkdownRenderer.render(this.app, text, body, this.plugin.focusPath, render))
+      .then(
+        () => undefined,
+        () => {
+          if (paintId !== this.logPaint || !body.isConnected) return;
+          body.classList.remove("markdown-rendered");
+          body.empty();
+          body.setText(text);
+        },
+      );
   }
 
   private onSend() {
