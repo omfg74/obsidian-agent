@@ -19,8 +19,11 @@ test("режим ограничивает инструменты", () => {
   assert.deepEqual(names("write"), ["read_note", "view_image", "search_replace", "write_note", "web_search", "fetch_url"]);
   assert.deepEqual(toolsForMode("all"), TOOLS);
   assert.throws(() => assertModeTool("chat", "write_note"), /режим chat не даёт write_note/);
+  assert.throws(() => assertModeTool("chat", "delete_note"), /режим chat не даёт delete_note/);
   assert.throws(() => assertModeTool("write", "create_folder"), /режим write не даёт create_folder/);
+  assert.throws(() => assertModeTool("write", "delete_note"), /режим write не даёт delete_note/);
   assert.doesNotThrow(() => assertModeTool("all", "create_folder"));
+  assert.doesNotThrow(() => assertModeTool("all", "delete_note"));
 });
 
 test("web-инструменты видны по тумблеру, остальные не тронуты", () => {
@@ -77,9 +80,10 @@ test("replaceOnce не трогает повтор", () => {
   assert.throws(() => replaceOnce("аа", "а", "б"), /больше одного раза/);
 });
 
-function memoryFs(): { fs: VaultFs; files: Map<string, string> } {
+function memoryFs(): { fs: VaultFs; files: Map<string, string>; trashed: string[] } {
   const files = new Map<string, string>([["лекция.md", "Было так."]]);
   const images = new Map<string, Uint8Array>([["кадр.png", Uint8Array.from([1, 2, 3])]]);
+  const trashed: string[] = [];
   const fs: VaultFs = {
     async find(path) {
       if (files.has(path) || images.has(path)) return { path, folder: false };
@@ -110,8 +114,14 @@ function memoryFs(): { fs: VaultFs; files: Map<string, string> } {
     async mkdir() {
       throw new Error("нельзя");
     },
+    async trash(path) {
+      if (!files.has(path) && !images.has(path)) throw new Error("нет");
+      files.delete(path);
+      images.delete(path);
+      trashed.push(path);
+    },
   };
-  return { fs, files };
+  return { fs, files, trashed };
 }
 
 test("агент смотрит картинку и правит текст", async () => {
@@ -370,6 +380,9 @@ test("неоднозначный путь не выбирает файл сам"
     async mkdir() {
       throw new Error("нельзя");
     },
+    async trash() {
+      throw new Error("нельзя");
+    },
   };
   await assert.rejects(() => resolvePath(fs, "заметка"), /несколько файлов/);
 });
@@ -397,6 +410,9 @@ test("heic не отправляется модели", async () => {
     async mkdir() {
       throw new Error("нельзя");
     },
+    async trash() {
+      throw new Error("нельзя");
+    },
   };
   await assert.rejects(() => dispatchTool(fs, "view_image", { path: "кадр.heic" }), /png, jpeg, gif и webp/);
 });
@@ -404,6 +420,7 @@ test("heic не отправляется модели", async () => {
 test("create_folder создаёт недостающих родителей и не затирает файл", async () => {
   const folders = new Set<string>();
   const files = new Set<string>(["заметка.md"]);
+  const trashed: string[] = [];
   const fs: VaultFs = {
     async find(path) {
       if (folders.has(path)) return { path, folder: true };
@@ -432,6 +449,11 @@ test("create_folder создаёт недостающих родителей и 
       if (files.has(path)) throw new Error("это файл: " + path);
       folders.add(path);
     },
+    async trash(path) {
+      if (!files.has(path)) throw new Error("нет");
+      files.delete(path);
+      trashed.push(path);
+    },
   };
   const made = await dispatchTool(fs, "create_folder", { path: "/архив/2026/" });
   assert.equal(made.text, "создал папки архив, архив/2026");
@@ -445,4 +467,18 @@ test("create_folder создаёт недостающих родителей и 
   await assert.rejects(() => dispatchTool(fs, "create_folder", { path: "архив/../секрет" }), /такой путь создать нельзя/);
   await assert.rejects(() => dispatchTool(fs, "create_folder", { path: "архив//черновик" }), /такой путь создать нельзя/);
   await assert.rejects(() => dispatchTool(fs, "create_folder", { path: "" }), /такой путь создать нельзя/);
+});
+
+test("delete_note отправляет файл в корзину, а не стирает", async () => {
+  const { fs, files, trashed } = memoryFs();
+  const out = await dispatchTool(fs, "delete_note", { path: "лекция" });
+  assert.equal(out.text, "отправил в корзину лекция.md");
+  assert.deepEqual(trashed, ["лекция.md"]);
+  assert.ok(!files.has("лекция.md"));
+});
+
+test("delete_note не трогает .obsidian и папки", async () => {
+  const { fs } = memoryFs();
+  await assert.rejects(() => dispatchTool(fs, "delete_note", { path: ".obsidian/app.json" }), /папку \.obsidian не трогаю/);
+  await assert.rejects(() => dispatchTool(fs, "delete_note", { path: "нет такой.md" }), /нет файла/);
 });

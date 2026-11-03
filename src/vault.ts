@@ -25,6 +25,7 @@ export interface VaultFs {
   bytes(path: string): Promise<Uint8Array>;
   children(path: string): Promise<Listed[]>;
   mkdir(path: string): Promise<void>;
+  trash(path: string): Promise<void>;
 }
 
 function folderPath(raw: string): string {
@@ -137,6 +138,11 @@ export async function dispatchTool(fs: VaultFs, name: string, args: Record<strin
     const content = str(args, "content");
     await fs.write(raw, content);
     return { text: "записал " + raw + ", " + content.length + " символов" };
+  }
+  if (name === "delete_note") {
+    const path = await resolvePath(fs, str(args, "path"));
+    await fs.trash(path);
+    return { text: "отправил в корзину " + path };
   }
   throw new Error("неизвестный инструмент " + name);
 }

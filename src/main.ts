@@ -394,6 +394,12 @@ export default class AgentPlugin extends Plugin {
         }
         await app.vault.createFolder(path);
       },
+      async trash(path) {
+        const file = app.vault.getAbstractFileByPath(path);
+        if (file instanceof TFolder) throw new Error("это папка: " + path);
+        if (!(file instanceof TFile)) throw new Error("нет файла " + path);
+        await app.vault.trash(file, true);
+      },
     };
   }
 }

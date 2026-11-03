@@ -110,6 +110,18 @@ export const TOOLS = [
   {
     type: "function",
     function: {
+      name: "delete_note",
+      description: "Убрать файл в корзину хранилища. Не удаляет папки и не стирает безвозвратно.",
+      parameters: {
+        type: "object",
+        properties: { path: { type: "string", description: "Путь от корня хранилища" } },
+        required: ["path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "web_search",
       description: "Поиск в сети. Возвращает заголовки, адреса и сниппеты.",
       parameters: {
@@ -196,6 +208,7 @@ function modeRules(mode: AgentMode): string {
     "Хранилище смотри только инструментами, не выдумывай текст файлов и картинок.",
     "Картинку сначала открой через view_image. Маленькую правку делай через search_replace.",
     "write_note переписывает файл целиком и не создаёт папку. Новую папку создай через create_folder: недостающие родители он создаёт сам.",
+    "Файл убирает только delete_note, и тот отправляет его в корзину, а не стирает. Без задания пользователя файлы не удаляй.",
   ].join("\n");
 }
 
