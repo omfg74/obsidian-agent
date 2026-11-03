@@ -1,10 +1,10 @@
-import { Component, ItemView, MarkdownRenderer, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf, requestUrl, setIcon, setTooltip, type App, type Debouncer, type DropdownComponent } from "obsidian";
+import { Component, ItemView, MarkdownRenderer, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf, requestUrl, setIcon, setTooltip, type App, type DropdownComponent } from "obsidian";
 import { assertModeTool, readTurnText, runAgent, systemPrompt, toolsForMode, type ChatMessage } from "./agent.ts";
 import { contextLabel, newSession, nextContextUsed, sessionTitle, sessionsFromSaved, stripImages, type ChatLine, type Session } from "./chats.ts";
 import { listedModels, modelMenuLabel, modelNotes, type ListedModel } from "./models.ts";
 import { capacitorOptions, httpRoute, readHttpResult, withDeadline, type HttpInit } from "./http.ts";
 import { AGENT_MODES, assignProviderBase, chatCompletionsUrl, freshSettings, MAX_STEPS, modelsEndpoint, newProviderId, presetById, PROVIDER_PRESETS, providerCanList, providerFromPreset, providerLabel, providerNeedsKey, requestHeaders, settingsFromSaved, type AgentMode, type AgentSettings, type Provider } from "./settings.ts";
-import { readOpenNote, writeOpenNote, type OpenEditor } from "./note-write.ts";
+import { readOpenNote, releaseEditorSave, writeOpenNote, type OpenEditor } from "./note-write.ts";
 import { dispatchTool, type VaultFs } from "./vault.ts";
 
 const VIEW = "obsidian-agent";
@@ -385,17 +385,11 @@ function openEditors(app: App, path: string): OpenEditor[] {
       mode,
       get: () => view.editor.getValue(),
       set: (content) => view.editor.setValue(content),
-      cancelPending: () => cancelPendingSave(view),
+      cancelPending: () => releaseEditorSave(view.requestSave),
       save: () => view.save(),
     });
   }
   return editors;
-}
-
-function cancelPendingSave(view: MarkdownView) {
-  const save = view.requestSave as Debouncer<[], Promise<void>>;
-  if (typeof save.cancel !== "function") throw new Error("отложенная запись редактора не отменяется");
-  save.cancel();
 }
 
 function iconButton(parent: HTMLElement, icon: string, label: string): HTMLElement {

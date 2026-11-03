@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readOpenNote, writeOpenNote, type OpenEditor } from "./note-write.ts";
+import { readOpenNote, releaseEditorSave, writeOpenNote, type OpenEditor } from "./note-write.ts";
 
 function store(initial: string) {
   let text = initial;
@@ -44,6 +44,19 @@ test("закрытая и читаемая заметка пишется в хр
   assert.deepEqual(disk.calls, ["modify"]);
 });
 
+test("отмена отложенной записи вызывается, только когда она есть", () => {
+  let cancelled = 0;
+  const debounced = () => {};
+  debounced.cancel = () => {
+    cancelled += 1;
+  };
+  releaseEditorSave(debounced);
+  assert.equal(cancelled, 1);
+  releaseEditorSave(() => {});
+  releaseEditorSave(undefined);
+  assert.equal(cancelled, 1);
+});
+
 test("режим правки пишет через редактор и отменяет отложенную запись", async () => {
   const disk = store("было");
   const note = editor("source", "было", (content) => {
@@ -51,6 +64,19 @@ test("режим правки пишет через редактор и отме
   });
   await writeOpenNote([note.open], disk, "стало");
   assert.deepEqual(note.calls, ["cancel", "set", "save"]);
+  assert.equal(disk.current(), "стало");
+});
+
+test("режим правки пишет файл, когда отложенную запись нельзя отменить", async () => {
+  const disk = store("было");
+  const note = editor("source", "было", (content) => {
+    void disk.modify(content);
+  });
+  note.open.cancelPending = () => {};
+  await writeOpenNote([note.open], disk, "стало");
+  assert.equal(note.open.get(), "стало");
+  assert.equal(disk.current(), "стало");
+  await note.open.save();
   assert.equal(disk.current(), "стало");
 });
 

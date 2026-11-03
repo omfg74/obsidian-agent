@@ -13,6 +13,15 @@ export interface NoteStore {
   modify(content: string): Promise<void>;
 }
 
+// requestSave в Obsidian — обёртка без cancel: отложенный save закрыт в замыкании.
+// Позже он читает текст редактора и не пишет, если файл уже совпал.
+export function releaseEditorSave(requestSave: unknown): void {
+  if (typeof requestSave !== "function" && (typeof requestSave !== "object" || requestSave === null)) return;
+  const cancel = (requestSave as { cancel?: unknown }).cancel;
+  if (typeof cancel !== "function") return;
+  cancel.call(requestSave);
+}
+
 export async function readOpenNote(editors: OpenEditor[], stored: string): Promise<string> {
   const source = editors.filter((editor) => editor.mode === "source");
   if (source.length === 0) return stored;

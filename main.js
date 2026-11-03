@@ -1010,6 +1010,12 @@ function httpPlugin(value) {
 }
 
 // src/note-write.ts
+function releaseEditorSave(requestSave) {
+  if (typeof requestSave !== "function" && (typeof requestSave !== "object" || requestSave === null)) return;
+  const cancel = requestSave.cancel;
+  if (typeof cancel !== "function") return;
+  cancel.call(requestSave);
+}
 async function readOpenNote(editors, stored) {
   const source = editors.filter((editor) => editor.mode === "source");
   if (source.length === 0) return stored;
@@ -1518,16 +1524,11 @@ function openEditors(app, path) {
       mode,
       get: () => view.editor.getValue(),
       set: (content) => view.editor.setValue(content),
-      cancelPending: () => cancelPendingSave(view),
+      cancelPending: () => releaseEditorSave(view.requestSave),
       save: () => view.save()
     });
   }
   return editors;
-}
-function cancelPendingSave(view) {
-  const save = view.requestSave;
-  if (typeof save.cancel !== "function") throw new Error("\u043E\u0442\u043B\u043E\u0436\u0435\u043D\u043D\u0430\u044F \u0437\u0430\u043F\u0438\u0441\u044C \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u0430 \u043D\u0435 \u043E\u0442\u043C\u0435\u043D\u044F\u0435\u0442\u0441\u044F");
-  save.cancel();
 }
 function iconButton(parent, icon, label) {
   const button = parent.createDiv({
