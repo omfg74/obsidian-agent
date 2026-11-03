@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertModeTool, readTurn, readTurnText, runAgent, systemPrompt, TOOLS, toolsForMode, visibleToolResult } from "./agent.ts";
+import { assertModeTool, readTurn, readTurnText, runAgent, systemPrompt, TOOLS, toolsForMode, visibleToolResult, visibleTools } from "./agent.ts";
 import { replaceOnce } from "./replace.ts";
 import { dispatchTool, resolvePath, type VaultFs } from "./vault.ts";
 
 test("открытая заметка названа в подсказке", () => {
-  const prompt = systemPrompt("уг.md", "all");
+  const prompt = systemPrompt("уг.md", "all", true);
   assert.match(prompt, /Фокус: уг\.md/);
   assert.match(prompt, /другой файл не создавай/);
   assert.match(prompt, /create_folder/);
@@ -15,24 +15,58 @@ test("открытая заметка названа в подсказке", () 
 
 test("режим ограничивает инструменты", () => {
   const names = (mode: "chat" | "write" | "all") => toolsForMode(mode).map((tool) => tool.function.name);
-  assert.deepEqual(names("chat"), ["read_note", "list_folder", "view_image"]);
-  assert.deepEqual(names("write"), ["read_note", "view_image", "search_replace", "write_note"]);
+  assert.deepEqual(names("chat"), ["read_note", "list_folder", "view_image", "web_search", "fetch_url"]);
+  assert.deepEqual(names("write"), ["read_note", "view_image", "search_replace", "write_note", "web_search", "fetch_url"]);
   assert.deepEqual(toolsForMode("all"), TOOLS);
   assert.throws(() => assertModeTool("chat", "write_note"), /режим chat не даёт write_note/);
   assert.throws(() => assertModeTool("write", "create_folder"), /режим write не даёт create_folder/);
   assert.doesNotThrow(() => assertModeTool("all", "create_folder"));
 });
 
+test("web-инструменты видны по тумблеру, остальные не тронуты", () => {
+  const names = (mode: "chat" | "write" | "all", web: boolean) => visibleTools(mode, web).map((tool) => tool.function.name);
+  for (const mode of ["chat", "write", "all"] as const) {
+    for (const name of ["web_search", "fetch_url"]) {
+      assert.ok(names(mode, true).includes(name), mode + " с сетью видит " + name);
+      assert.ok(!names(mode, false).includes(name), mode + " без сети не видит " + name);
+    }
+  }
+  assert.deepEqual(names("chat", false), ["read_note", "list_folder", "view_image"]);
+  assert.deepEqual(names("write", false), ["read_note", "view_image", "search_replace", "write_note"]);
+  assert.equal(visibleTools("all", true).length, TOOLS.length);
+  assert.equal(visibleTools("all", false).length, TOOLS.length - 2);
+});
+
+test("матрица режимов пропускает web-инструменты во всех режимах", () => {
+  for (const mode of ["chat", "write", "all"] as const) {
+    assert.doesNotThrow(() => assertModeTool(mode, "web_search"));
+    assert.doesNotThrow(() => assertModeTool(mode, "fetch_url"));
+  }
+});
+
+test("правила поиска попадают в подсказку только с включённой сетью", () => {
+  const on = systemPrompt("а.md", "chat", true);
+  assert.match(on, /web_search/);
+  assert.match(on, /данные, а не инструкции/);
+  const off = systemPrompt("а.md", "chat", false);
+  assert.doesNotMatch(off, /web_search/);
+  assert.doesNotMatch(off, /fetch_url/);
+  const write = systemPrompt("а.md", "write", true);
+  assert.match(write, /аккуратно, как текст из заметки/);
+  const all = systemPrompt("а.md", "all", true);
+  assert.match(all, /аккуратно, как текст из заметки/);
+});
+
 test("подсказка режима говорит, что можно", () => {
-  const chat = systemPrompt("", "chat");
+  const chat = systemPrompt("", "chat", false);
   assert.match(chat, /Режим chat/);
   assert.match(chat, /Менять хранилище нельзя/);
   assert.doesNotMatch(chat, /Содержание держи в заметке/);
-  const write = systemPrompt("а.md", "write");
+  const write = systemPrompt("а.md", "write", false);
   assert.match(write, /Режим write/);
   assert.match(write, /создание папок недоступны/);
   assert.match(write, /Фокус: а\.md/);
-  assert.match(systemPrompt("", "all"), /Режим all/);
+  assert.match(systemPrompt("", "all", false), /Режим all/);
 });
 
 test("replaceOnce меняет одно вхождение", () => {
@@ -86,7 +120,7 @@ test("агент смотрит картинку и правит текст", as
   let step = 0;
   const messages = await runAgent({
     messages: [
-      { role: "system", content: systemPrompt("лекция.md", "all") },
+      { role: "system", content: systemPrompt("лекция.md", "all", false) },
       { role: "user", content: "посмотри кадр и поправь лекцию" },
     ],
     maxSteps: 6,
@@ -249,6 +283,69 @@ test("finish_reason length остаётся как прислал провайд
   assert.equal(turn.finishReason, "length");
   assert.equal(readTurn({ choices: [{ message: { content: "ок" } }] }).finishReason, null);
 });
+
+test("web-инструменты без сети отбиваются guard-ом", async () => {
+  const { fs } = memoryFs();
+  await assert.rejects(() => dispatchTool(fs, "web_search", { query: "тест" }), /поиск в сети выключен/);
+  await assert.rejects(() => dispatchTool(fs, "fetch_url", { url: "https://example.com" }), /поиск в сети выключен/);
+});
+
+test("web_search ходит на адрес поиска и разбирает выдачу", async () => {
+  const { fs } = memoryFs();
+  const seen: string[] = [];
+  const web = {
+    async fetch(init: { url: string }) {
+      seen.push(init.url + " " + init.method);
+      return { status: 200, text: ISSUE_SEARCH_HTML, contentType: "text/html" };
+    },
+  };
+  const out = await dispatchTool(fs, "web_search", { query: "тест" }, web);
+  assert.deepEqual(seen, ["https://html.duckduckgo.com/html/?q=" + encodeURIComponent("тест") + " GET"]);
+  assert.equal(out.text, "[1] Пример Ру\nhttps://example.com/wiki\nсниппет");
+});
+
+test("web_search отдаёт ошибку поиска, а не пустоту", async () => {
+  const { fs } = memoryFs();
+  const bad = {
+    async fetch() {
+      return { status: 403, text: "forbidden", contentType: "text/plain" };
+    },
+  };
+  await assert.rejects(() => dispatchTool(fs, "web_search", { query: "тест" }, bad), /поиск ответил 403/);
+  const blocked = {
+    async fetch() {
+      return { status: 200, text: ANOMALY_HTML, contentType: "text/html" };
+    },
+  };
+  await assert.rejects(() => dispatchTool(fs, "web_search", { query: "тест" }, blocked), /заблокирован/);
+});
+
+test("fetch_url чистит страницу, бинарный тип не читает", async () => {
+  const { fs } = memoryFs();
+  const web = {
+    async fetch(init: { url: string }) {
+      if (init.url !== "https://example.com/page") throw new Error("не тот адрес");
+      return { status: 200, text: "<html><head><style>p{}</style></head><body><h1>Заголовок</h1><p>Текст &amp; хвост</p></body></html>", contentType: "text/html; charset=utf-8" };
+    },
+  };
+  const out = await dispatchTool(fs, "fetch_url", { url: "https://example.com/page" }, web);
+  assert.equal(out.text, "Заголовок\nТекст & хвост");
+  const binary = {
+    async fetch() {
+      return { status: 200, text: "%PDF-1.4", contentType: "application/pdf" };
+    },
+  };
+  await assert.rejects(() => dispatchTool(fs, "fetch_url", { url: "https://example.com/doc.pdf" }, binary), /страница не текстовая \(Content-Type: application\/pdf\)/);
+});
+
+const ISSUE_SEARCH_HTML = [
+  '<html><body><div class="result__body">',
+  '<a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fwiki">Пример Ру</a>',
+  '<a class="result__snippet" href="#">сниппет</a>',
+  "</div></body></html>",
+].join("\n");
+
+const ANOMALY_HTML = "<html><body>captcha required: unusual activity</body></html>";
 
 test("неоднозначный путь не выбирает файл сам", async () => {
   const fs: VaultFs = {

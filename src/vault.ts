@@ -1,8 +1,11 @@
 import { replaceOnce } from "./replace.ts";
+import { extractPageText, formatSearchResults, nonTextContentType, pageUrl, parseSearchHtml, blockedPage, searchQuery, searchUrl, trimFetch } from "./web.ts";
+import type { HttpInit } from "./http.ts";
 
 const TEXT_LIMIT = 100_000;
 const LIST_LIMIT = 200;
 const IMAGE_LIMIT = 4 * 1024 * 1024;
+const FETCH_RESPONSE_LIMIT = 2_000_000;
 
 const IMAGE_MIME: Record<string, string> = {
   png: "image/png",
@@ -83,7 +86,19 @@ export async function resolvePath(fs: VaultFs, raw: string): Promise<string> {
   throw new Error("несколько файлов: " + hits.join(", "));
 }
 
-export async function dispatchTool(fs: VaultFs, name: string, args: Record<string, unknown>): Promise<{ text: string; image?: { mime: string; base64: string } }> {
+export interface WebHttp {
+  fetch(init: HttpInit): Promise<{ status: number; text: string; contentType: string }>;
+}
+
+export async function dispatchTool(fs: VaultFs, name: string, args: Record<string, unknown>, web?: WebHttp): Promise<{ text: string; image?: { mime: string; base64: string } }> {
+  if (name === "web_search") {
+    if (!web) throw new Error("поиск в сети выключен в настройках");
+    return { text: await webSearch(web, args) };
+  }
+  if (name === "fetch_url") {
+    if (!web) throw new Error("поиск в сети выключен в настройках");
+    return { text: await fetchPage(web, args) };
+  }
   if (name === "list_folder") {
     const path = str(args, "path").replace(/^\//, "").replace(/\/$/, "");
     if (path.startsWith(".obsidian/") || path === ".obsidian") throw new Error("папку .obsidian не читаю");
@@ -124,4 +139,32 @@ export async function dispatchTool(fs: VaultFs, name: string, args: Record<strin
     return { text: "записал " + raw + ", " + content.length + " символов" };
   }
   throw new Error("неизвестный инструмент " + name);
+}
+
+async function webSearch(web: WebHttp, args: Record<string, unknown>): Promise<string> {
+  const query = searchQuery(args);
+  const res = await web.fetch({ url: searchUrl(query), method: "GET", headers: {} });
+  if (res.status !== 200) {
+    const body = res.text.slice(0, 300);
+    throw new Error("поиск ответил " + res.status + (body ? ": " + body : ""));
+  }
+  if (blockedPage(res.text)) throw new Error("поиск не отдал результата (возможно, запрос заблокирован)");
+  const results = parseSearchHtml(res.text);
+  if (results === null) throw new Error("разметка выдачи не распознана");
+  if (results.length === 0) throw new Error("поиск не нашёл результатов");
+  return formatSearchResults(results);
+}
+
+async function fetchPage(web: WebHttp, args: Record<string, unknown>): Promise<string> {
+  const url = pageUrl(args);
+  const res = await web.fetch({ url, method: "GET", headers: {} });
+  if (res.status !== 200) {
+    const body = res.text.slice(0, 300);
+    throw new Error("страница ответила " + res.status + (body ? ": " + body : ""));
+  }
+  if (nonTextContentType(res.contentType)) throw new Error("страница не текстовая (Content-Type: " + res.contentType + ")");
+  if (res.text.length > FETCH_RESPONSE_LIMIT) throw new Error("страница больше " + FETCH_RESPONSE_LIMIT + " символов: " + res.text.length);
+  const text = extractPageText(res.text);
+  if (!text) throw new Error("в странице не нашлось текста");
+  return trimFetch(text);
 }

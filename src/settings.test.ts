@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assignProviderBase, chatCompletionsUrl, modelsEndpoint, presetById, providerFromPreset, providerLabel, providerNeedsKey, requestHeaders, settingsFromSaved } from "./settings.ts";
+import { assignProviderBase, chatCompletionsUrl, freshSettings, modelsEndpoint, presetById, providerFromPreset, providerLabel, providerNeedsKey, requestHeaders, settingsFromSaved } from "./settings.ts";
 
 test("служебное имя провайдера показывается как адрес", () => {
   assert.equal(providerLabel({ id: "saved", name: "основной", base: "https://api.openai.com/v1", key: "", model: "" }), "api.openai.com");
@@ -168,6 +168,15 @@ test("режим сохраняется, старые настройки ост�
   assert.equal(settingsFromSaved({ providers: [], mode: "write" }).mode, "write");
   assert.throws(() => settingsFromSaved({ providers: [], mode: "ask" }), /режим/);
   assert.throws(() => settingsFromSaved({ providers: [], mode: "" }), /режим/);
+});
+
+test("сеть включена по умолчанию и читается из настроек", () => {
+  assert.equal(settingsFromSaved({ providers: [] }).web, true);
+  assert.equal(settingsFromSaved({ providers: [], web: false }).web, false);
+  assert.equal(settingsFromSaved({ providers: [], web: true }).web, true);
+  assert.equal(freshSettings().web, true);
+  assert.throws(() => settingsFromSaved({ providers: [], web: "да" }), /настройка поиска повреждена/);
+  assert.throws(() => settingsFromSaved({ providers: [], web: 1 }), /настройка поиска повреждена/);
 });
 
 test("битый провайдер не превращается в рабочий", () => {

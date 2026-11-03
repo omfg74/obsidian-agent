@@ -178,6 +178,7 @@ export interface AgentSettings {
   activeId: string;
   maxSteps: number;
   mode: AgentMode;
+  web: boolean;
 }
 
 export function freshSettings(): AgentSettings {
@@ -186,6 +187,7 @@ export function freshSettings(): AgentSettings {
     activeId: "openai",
     maxSteps: 8,
     mode: "all",
+    web: true,
   };
 }
 
@@ -283,10 +285,11 @@ export function settingsFromSaved(saved: unknown): AgentSettings {
   const data = saved as Record<string, unknown>;
   const maxSteps = readSteps(data.maxSteps);
   const mode = readMode(data.mode);
+  const web = readWeb(data.web);
   if ("providers" in data) {
     const providers = readProviders(data.providers);
     const activeId = typeof data.activeId === "string" ? data.activeId : "";
-    return { providers, activeId, maxSteps, mode };
+    return { providers, activeId, maxSteps, mode, web };
   }
   if ("base" in data || "key" in data || "model" in data) {
     const provider: Provider = {
@@ -296,9 +299,15 @@ export function settingsFromSaved(saved: unknown): AgentSettings {
       key: typeof data.key === "string" ? data.key : "",
       model: typeof data.model === "string" ? data.model.trim() : "",
     };
-    return { providers: [provider], activeId: provider.id, maxSteps, mode };
+    return { providers: [provider], activeId: provider.id, maxSteps, mode, web };
   }
-  return { ...freshSettings(), maxSteps, mode };
+  return { ...freshSettings(), maxSteps, mode, web };
+}
+
+function readWeb(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (typeof value === "boolean") return value;
+  throw new Error("настройка поиска повреждена");
 }
 
 function readMode(value: unknown): AgentMode {

@@ -1,13 +1,15 @@
 import { Component, ItemView, MarkdownRenderer, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf, requestUrl, setIcon, setTooltip, type App, type DropdownComponent } from "obsidian";
-import { assertModeTool, readTurnText, runAgent, systemPrompt, toolsForMode, type ChatMessage } from "./agent.ts";
+import { assertModeTool, readTurnText, runAgent, systemPrompt, visibleTools, type ChatMessage } from "./agent.ts";
 import { contextLabel, newSession, nextContextUsed, sessionTitle, sessionsFromSaved, stripImages, type ChatLine, type Session } from "./chats.ts";
 import { listedModels, modelMenuLabel, modelNotes, type ListedModel } from "./models.ts";
 import { capacitorOptions, httpRoute, readHttpResult, withDeadline, type HttpInit } from "./http.ts";
 import { AGENT_MODES, assignProviderBase, chatCompletionsUrl, freshSettings, MAX_STEPS, modelsEndpoint, newProviderId, presetById, PROVIDER_PRESETS, providerCanList, providerFromPreset, providerLabel, providerNeedsKey, requestHeaders, settingsFromSaved, type AgentMode, type AgentSettings, type Provider } from "./settings.ts";
 import { readOpenNote, releaseEditorSave, writeOpenNote, type OpenEditor } from "./note-write.ts";
-import { dispatchTool, type VaultFs } from "./vault.ts";
+import { dispatchTool, type VaultFs, type WebHttp } from "./vault.ts";
 
 const VIEW = "obsidian-agent";
+
+const WEB_TIMEOUT_MS = 20_000;
 
 export default class AgentPlugin extends Plugin {
   settings: AgentSettings = freshSettings();
@@ -247,8 +249,8 @@ export default class AgentPlugin extends Plugin {
     this.stop = false;
     this.paint();
     const mode = this.settings.mode;
-    const tools = toolsForMode(mode);
-    const messages: ChatMessage[] = [{ role: "system", content: systemPrompt(active, mode) }, ...session.history.filter((item) => item.role !== "system")];
+    const tools = visibleTools(mode, this.settings.web);
+    const messages: ChatMessage[] = [{ role: "system", content: systemPrompt(active, mode, this.settings.web) }, ...session.history.filter((item) => item.role !== "system")];
     try {
       await runAgent({
         messages,
@@ -263,7 +265,7 @@ export default class AgentPlugin extends Plugin {
         },
         callTool: (name, args) => {
           assertModeTool(mode, name);
-          return dispatchTool(this.vaultFs(), name, args);
+          return dispatchTool(this.vaultFs(), name, args, this.webHttp());
         },
       });
       const last = messages[messages.length - 1];
@@ -282,7 +284,7 @@ export default class AgentPlugin extends Plugin {
     }
   }
 
-  private async post(provider: Provider, model: string, messages: ChatMessage[], tools: ReturnType<typeof toolsForMode>) {
+  private async post(provider: Provider, model: string, messages: ChatMessage[], tools: ReturnType<typeof visibleTools>) {
     const res = await this.callApi(provider, {
       url: chatCompletionsUrl(provider),
       method: "POST",
@@ -315,6 +317,28 @@ export default class AgentPlugin extends Plugin {
     }).then((res) => ({ status: res.status, text: res.text }));
     if (seconds === undefined) return pending;
     return withDeadline(pending, seconds * 1000, "таймаут " + seconds + " с");
+  }
+
+  private webHttp(): WebHttp {
+    return {
+      fetch: async (init) => {
+        const route = httpRoute();
+        if (route.kind === "capacitor") {
+          const res = await route.request.request(capacitorOptions(init, WEB_TIMEOUT_MS));
+          const out = readHttpResult(res.status, res.data);
+          return { status: out.status, text: out.text, contentType: "" };
+        }
+        if (route.kind === "unavailable") throw new Error("сеть на этом устройстве недоступна");
+        const pending = requestUrl({
+          url: init.url,
+          method: init.method,
+          headers: init.headers,
+          body: init.body,
+          throw: false,
+        }).then((res) => ({ status: res.status, text: res.text, contentType: res.headers["content-type"] ?? "" }));
+        return withDeadline(pending, WEB_TIMEOUT_MS, "страница не ответила за 20 секунд");
+      },
+    };
   }
 
   private vaultFs(): VaultFs {
@@ -918,6 +942,14 @@ class AgentSettingTab extends PluginSettingTab {
         }
         this.plugin.settings.maxSteps = steps;
         await this.plugin.saveSettings();
+      }));
+    new Setting(containerEl)
+      .setName("Поиск в сети")
+      .setDesc("даёт агенту web_search и fetch_url без ключа")
+      .addToggle((toggle) => toggle.setValue(this.plugin.settings.web).onChange(async (value) => {
+        this.plugin.settings.web = value;
+        await this.plugin.saveSettings();
+        this.plugin.paint();
       }));
   }
 
