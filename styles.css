@@ -71,6 +71,17 @@
   color: var(--text-normal);
 }
 
+.agent-assistant {
+  cursor: text;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.agent-assistant * {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 .agent-note,
 .agent-tool {
   color: var(--text-muted);
