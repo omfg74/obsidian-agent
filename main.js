@@ -669,11 +669,8 @@ function contextLabel(used, limit) {
   if (limit === null) return text;
   return text + " / " + groupDigits(limit);
 }
-function nextContextUsed(used, usage) {
-  const turn = usage.prompt + usage.completion;
-  if (used === null) return turn;
-  if (usage.prompt >= used) return turn;
-  return used + turn;
+function nextContextUsed(usage) {
+  return usage.prompt + usage.completion;
 }
 function groupDigits(value) {
   return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
@@ -1399,7 +1396,7 @@ var AgentPlugin = class extends import_obsidian.Plugin {
         onLine: (line) => this.push({ kind: "tool", text: line }),
         post: async (batch) => {
           const turn = await this.post(provider, model, batch, tools);
-          if (turn.usage !== null) session.contextUsed = nextContextUsed(session.contextUsed, turn.usage);
+          if (turn.usage !== null) session.contextUsed = nextContextUsed(turn.usage);
           this.paint();
           return turn;
         },

@@ -257,7 +257,7 @@ export default class AgentPlugin extends Plugin {
         onLine: (line) => this.push({ kind: "tool", text: line }),
         post: async (batch) => {
           const turn = await this.post(provider, model, batch, tools);
-          if (turn.usage !== null) session.contextUsed = nextContextUsed(session.contextUsed, turn.usage);
+          if (turn.usage !== null) session.contextUsed = nextContextUsed(turn.usage);
           this.paint();
           return turn;
         },

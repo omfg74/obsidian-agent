@@ -48,10 +48,11 @@ test("сохранённый размер контекста читается, �
   }), /чат повреждён/);
 });
 
-test("контекст чата растёт, а не сбрасывается на последнее сообщение", () => {
-  assert.equal(nextContextUsed(null, { prompt: 400, completion: 20 }), 420);
-  assert.equal(nextContextUsed(420, { prompt: 500, completion: 30 }), 530);
-  assert.equal(nextContextUsed(530, { prompt: 40, completion: 10 }), 580);
+test("счётчик показывает размер последнего запроса, а не накапливает", () => {
+  assert.equal(nextContextUsed({ prompt: 400, completion: 20 }), 420);
+  assert.equal(nextContextUsed({ prompt: 500, completion: 30 }), 530);
+  // на раздутом значении счётчик всё равно возвращается к реальному размеру
+  assert.equal(nextContextUsed({ prompt: 5100, completion: 100 }), 5200);
 });
 
 test("подпись счётчика группирует тысячи и не выдумывает окно", () => {

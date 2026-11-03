@@ -22,11 +22,12 @@ export function contextLabel(used: number, limit: number | null): string {
   return text + " / " + groupDigits(limit);
 }
 
-export function nextContextUsed(used: number | null, usage: { prompt: number; completion: number }): number {
-  const turn = usage.prompt + usage.completion;
-  if (used === null) return turn;
-  if (usage.prompt >= used) return turn;
-  return used + turn;
+/**
+ * Размер контекста равен prompt + completion последнего запроса:
+ * промпт уже содержит всю историю чата, накопление задваивало.
+ */
+export function nextContextUsed(usage: { prompt: number; completion: number }): number {
+  return usage.prompt + usage.completion;
 }
 
 function groupDigits(value: number): string {
