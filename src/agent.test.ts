@@ -14,21 +14,25 @@ test("открытая заметка названа в подсказке", () 
 });
 
 test("режим ограничивает инструменты", () => {
-  const names = (mode: "chat" | "write" | "all") => toolsForMode(mode).map((tool) => tool.function.name);
+  const names = (mode: "chat" | "write" | "delete" | "all") => toolsForMode(mode).map((tool) => tool.function.name);
   assert.deepEqual(names("chat"), ["read_note", "list_folder", "view_image", "web_search", "fetch_url"]);
   assert.deepEqual(names("write"), ["read_note", "view_image", "search_replace", "write_note", "web_search", "fetch_url"]);
+  assert.deepEqual(names("delete"), ["read_note", "list_folder", "view_image", "delete_note", "web_search", "fetch_url"]);
   assert.deepEqual(toolsForMode("all"), TOOLS);
   assert.throws(() => assertModeTool("chat", "write_note"), /режим chat не даёт write_note/);
   assert.throws(() => assertModeTool("chat", "delete_note"), /режим chat не даёт delete_note/);
   assert.throws(() => assertModeTool("write", "create_folder"), /режим write не даёт create_folder/);
   assert.throws(() => assertModeTool("write", "delete_note"), /режим write не даёт delete_note/);
+  assert.throws(() => assertModeTool("delete", "write_note"), /режим delete не даёт write_note/);
+  assert.throws(() => assertModeTool("delete", "search_replace"), /режим delete не даёт search_replace/);
+  assert.doesNotThrow(() => assertModeTool("delete", "delete_note"));
   assert.doesNotThrow(() => assertModeTool("all", "create_folder"));
   assert.doesNotThrow(() => assertModeTool("all", "delete_note"));
 });
 
 test("web-инструменты видны по тумблеру, остальные не тронуты", () => {
-  const names = (mode: "chat" | "write" | "all", web: boolean) => visibleTools(mode, web).map((tool) => tool.function.name);
-  for (const mode of ["chat", "write", "all"] as const) {
+  const names = (mode: "chat" | "write" | "delete" | "all", web: boolean) => visibleTools(mode, web).map((tool) => tool.function.name);
+  for (const mode of ["chat", "write", "delete", "all"] as const) {
     for (const name of ["web_search", "fetch_url"]) {
       assert.ok(names(mode, true).includes(name), mode + " с сетью видит " + name);
       assert.ok(!names(mode, false).includes(name), mode + " без сети не видит " + name);
@@ -36,6 +40,7 @@ test("web-инструменты видны по тумблеру, осталь�
   }
   assert.deepEqual(names("chat", false), ["read_note", "list_folder", "view_image"]);
   assert.deepEqual(names("write", false), ["read_note", "view_image", "search_replace", "write_note"]);
+  assert.deepEqual(names("delete", false), ["read_note", "list_folder", "view_image", "delete_note"]);
   assert.equal(visibleTools("all", true).length, TOOLS.length);
   assert.equal(visibleTools("all", false).length, TOOLS.length - 2);
 });
@@ -69,6 +74,11 @@ test("подсказка режима говорит, что можно", () => 
   assert.match(write, /Режим write/);
   assert.match(write, /создание папок недоступны/);
   assert.match(write, /Фокус: а\.md/);
+  const del = systemPrompt("а.md", "delete", false);
+  assert.match(del, /Режим delete/);
+  assert.match(del, /в корзину/);
+  assert.match(del, /write_note и search_replace недоступны/);
+  assert.doesNotMatch(del, /переписывает файл целиком/);
   assert.match(systemPrompt("", "all", false), /Режим all/);
 });
 

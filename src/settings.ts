@@ -169,7 +169,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
 
 export const MAX_STEPS = 100;
 
-export const AGENT_MODES = ["chat", "write", "all"] as const;
+export const AGENT_MODES = ["chat", "write", "delete", "all"] as const;
 
 export type AgentMode = (typeof AGENT_MODES)[number];
 
@@ -312,7 +312,7 @@ function readWeb(value: unknown): boolean {
 
 function readMode(value: unknown): AgentMode {
   if (value === undefined) return "all";
-  if (value === "chat" || value === "write" || value === "all") return value;
+  if (typeof value === "string" && (AGENT_MODES as readonly string[]).includes(value)) return value as AgentMode;
   throw new Error("режим в настройках повреждён");
 }
 

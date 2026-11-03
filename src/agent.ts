@@ -150,6 +150,7 @@ export const WEB_TOOLS: ReadonlySet<string> = new Set(["web_search", "fetch_url"
 const MODE_NAMES: Record<AgentMode, ReadonlySet<string>> = {
   chat: new Set(["read_note", "list_folder", "view_image", ...WEB_TOOLS]),
   write: new Set(["read_note", "view_image", "search_replace", "write_note", ...WEB_TOOLS]),
+  delete: new Set(["read_note", "list_folder", "view_image", "delete_note", ...WEB_TOOLS]),
   all: new Set(TOOLS.map((tool) => tool.function.name)),
 };
 
@@ -185,6 +186,7 @@ function focusLine(activePath: string, mode: AgentMode): string {
   if (!activePath) return "Фокус не выбран. Не выдумывай путь к файлу.";
   const who = "Фокус: " + activePath + ". «Этот файл», «эта заметка» и «здесь» — это он.";
   if (mode === "chat") return who + " Отвечай про него, файл не меняй.";
+  if (mode === "delete") return who + " Удаляй его и другие файлы только по прямому заданию пользователя.";
   return who + " Такой запрос правь в нём, другой файл не создавай.";
 }
 
@@ -201,6 +203,14 @@ function modeRules(mode: AgentMode): string {
       "Хранилище смотри только инструментами, не выдумывай текст файлов и картинок.",
       "Картинку сначала открой через view_image. Маленькую правку делай через search_replace.",
       "write_note переписывает файл целиком и не создаёт папку. Список папок и создание папок недоступны.",
+    ].join("\n");
+  }
+  if (mode === "delete") {
+    return [
+      "Ты агент внутри Obsidian. Режим delete: читай хранилище и убирай файлы в корзину.",
+      "Хранилище смотри только инструментами, не выдумывай текст файлов и картинок.",
+      "delete_note отправляет файл в корзину, а не стирает. Удаляй только файлы, названные пользователем прямо: папки и .obsidian инструмент не трогает.",
+      "Писать и править текст нельзя: write_note и search_replace недоступны.",
     ].join("\n");
   }
   return [

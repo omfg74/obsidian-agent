@@ -440,11 +440,12 @@ function iconButton(parent: HTMLElement, icon: string, label: string): HTMLEleme
 const MODE_HINT: Record<AgentMode, string> = {
   chat: "читает, ничего не пишет",
   write: "читает и правит файлы",
-  all: "читает, правит файлы и папки",
+  delete: "читает и убирает файлы в корзину",
+  all: "читает, правит файлы и папки, убирает в корзину",
 };
 
 function isAgentMode(value: string | undefined): value is AgentMode {
-  return value === "chat" || value === "write" || value === "all";
+  return value !== undefined && (AGENT_MODES as readonly string[]).includes(value);
 }
 
 function modelKey(model: ListedModel): string {

@@ -166,6 +166,7 @@ test("режим сохраняется, старые настройки ост�
   assert.equal(settingsFromSaved({ providers: [], maxSteps: 4 }).mode, "all");
   assert.equal(settingsFromSaved({ providers: [], mode: "chat" }).mode, "chat");
   assert.equal(settingsFromSaved({ providers: [], mode: "write" }).mode, "write");
+  assert.equal(settingsFromSaved({ providers: [], mode: "delete" }).mode, "delete");
   assert.throws(() => settingsFromSaved({ providers: [], mode: "ask" }), /режим/);
   assert.throws(() => settingsFromSaved({ providers: [], mode: "" }), /режим/);
 });
