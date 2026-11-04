@@ -42,6 +42,19 @@ test("пустая выдача остаётся пустым массивом",
   assert.deepEqual(parseSearchHtml(EMPTY_FIXTURE), []);
 });
 
+test("расхождение заголовков и сниппетов — явная ошибка, не подстановка", () => {
+  const shifted = [
+    '<html><body><div class="result__body">',
+    '<a class="result__a" href="https://one.example/">Первый</a>',
+    "</div>",
+    '<div class="result__body">',
+    '<a class="result__a" href="https://two.example/">Второй</a>',
+    '<a class="result__snippet" href="#">единственный сниппет</a>',
+    "</div></body></html>",
+  ].join("\n");
+  assert.throws(() => parseSearchHtml(shifted), /разметка выдачи не распознана: заголовков 2, сниппетов 1/);
+});
+
 test("капча и посторонняя страница не выдача", () => {
   assert.equal(parseSearchHtml(ANOMALY_FIXTURE), null);
   assert.equal(parseSearchHtml("<html><body>совсем не поиск</body></html>"), null);

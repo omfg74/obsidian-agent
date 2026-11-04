@@ -154,10 +154,12 @@ async function webSearch(web: WebHttp, args: Record<string, unknown>): Promise<s
     const body = res.text.slice(0, 300);
     throw new Error("поиск ответил " + res.status + (body ? ": " + body : ""));
   }
-  if (blockedPage(res.text)) throw new Error("поиск не отдал результата (возможно, запрос заблокирован)");
   const results = parseSearchHtml(res.text);
   if (results === null) throw new Error("разметка выдачи не распознана");
-  if (results.length === 0) throw new Error("поиск не нашёл результатов");
+  if (results.length === 0) {
+    if (blockedPage(res.text)) throw new Error("поиск не отдал результата (возможно, запрос заблокирован)");
+    throw new Error("поиск не нашёл результатов");
+  }
   return formatSearchResults(results);
 }
 
@@ -169,6 +171,7 @@ async function fetchPage(web: WebHttp, args: Record<string, unknown>): Promise<s
     throw new Error("страница ответила " + res.status + (body ? ": " + body : ""));
   }
   if (nonTextContentType(res.contentType)) throw new Error("страница не текстовая (Content-Type: " + res.contentType + ")");
+  if (res.text.startsWith("%PDF") || res.text.startsWith("PK")) throw new Error("страница не текстовая: в начале тела " + (res.text.startsWith("%PDF") ? "%PDF (pdf)" : "PK (zip)"));
   if (res.text.length > FETCH_RESPONSE_LIMIT) throw new Error("страница больше " + FETCH_RESPONSE_LIMIT + " символов: " + res.text.length);
   const text = extractPageText(res.text);
   if (!text) throw new Error("в странице не нашлось текста");

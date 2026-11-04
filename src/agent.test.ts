@@ -63,6 +63,9 @@ test("правила поиска попадают в подсказку тол�
   assert.match(write, /аккуратно, как текст из заметки/);
   const all = systemPrompt("а.md", "all", true);
   assert.match(all, /аккуратно, как текст из заметки/);
+  const del = systemPrompt("а.md", "delete", true);
+  assert.match(del, /данные, а не инструкции/);
+  assert.doesNotMatch(del, /аккуратно, как текст из заметки/);
 });
 
 test("подсказка режима говорит, что можно", () => {
@@ -334,10 +337,28 @@ test("web_search отдаёт ошибку поиска, а не пустоту"
   await assert.rejects(() => dispatchTool(fs, "web_search", { query: "тест" }, bad), /поиск ответил 403/);
   const blocked = {
     async fetch() {
-      return { status: 200, text: ANOMALY_HTML, contentType: "text/html" };
+      return { status: 200, text: EMPTY_BLOCKED_HTML, contentType: "text/html" };
     },
   };
   await assert.rejects(() => dispatchTool(fs, "web_search", { query: "тест" }, blocked), /заблокирован/);
+  const чужая = {
+    async fetch() {
+      return { status: 200, text: ANOMALY_HTML, contentType: "text/html" };
+    },
+  };
+  await assert.rejects(() => dispatchTool(fs, "web_search", { query: "тест" }, чужая), /разметка выдачи не распознана/);
+});
+
+test("маркер блокировки в сниппете легитимного запроса не ломает выдачу", async () => {
+  const { fs } = memoryFs();
+  const web = {
+    async fetch() {
+      return { status: 200, text: MARKER_SEARCH_HTML, contentType: "text/html" };
+    },
+  };
+  const out = await dispatchTool(fs, "web_search", { query: "anomaly detection" }, web);
+  assert.match(out.text, /\[1\] Детекция аномалий/);
+  assert.match(out.text, /unusual traffic/);
 });
 
 test("fetch_url чистит страницу, бинарный тип не читает", async () => {
@@ -356,6 +377,18 @@ test("fetch_url чистит страницу, бинарный тип не чи
     },
   };
   await assert.rejects(() => dispatchTool(fs, "fetch_url", { url: "https://example.com/doc.pdf" }, binary), /страница не текстовая \(Content-Type: application\/pdf\)/);
+  const magicPdf = {
+    async fetch() {
+      return { status: 200, text: "%PDF-1.7\nбинарный мусор", contentType: "" };
+    },
+  };
+  await assert.rejects(() => dispatchTool(fs, "fetch_url", { url: "https://example.com/doc.pdf" }, magicPdf), /страница не текстовая: в начале тела %PDF/);
+  const magicZip = {
+    async fetch() {
+      return { status: 200, text: "PK\u0003\u0004архив", contentType: "" };
+    },
+  };
+  await assert.rejects(() => dispatchTool(fs, "fetch_url", { url: "https://example.com/doc.zip" }, magicZip), /страница не текстовая: в начале тела PK/);
 });
 
 const ISSUE_SEARCH_HTML = [
@@ -364,6 +397,15 @@ const ISSUE_SEARCH_HTML = [
   '<a class="result__snippet" href="#">сниппет</a>',
   "</div></body></html>",
 ].join("\n");
+
+const MARKER_SEARCH_HTML = [
+  '<html><body><div class="result__body">',
+  '<a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fanomaly">Детекция аномалий</a>',
+  '<a class="result__snippet" href="#">Методы поиска unusual traffic в логах</a>',
+  "</div></body></html>",
+].join("\n");
+
+const EMPTY_BLOCKED_HTML = '<html><body><div class="no-results">Unfortunately, bots use DuckDuckGo too: unusual traffic detected.</div></body></html>';
 
 const ANOMALY_HTML = "<html><body>captcha required: unusual activity</body></html>";
 

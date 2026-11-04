@@ -328,7 +328,8 @@ export default class AgentPlugin extends Plugin {
           const out = readHttpResult(res.status, res.data);
           return { status: out.status, text: out.text, contentType: "" };
         }
-        if (route.kind === "unavailable") throw new Error("сеть на этом устройстве недоступна");
+        // На мобильном без CapacitorHttp («unavailable») requestUrl работает —
+        // тем же путём ходят запросы к модели, поэтому web-инструменты идут через него же.
         const pending = requestUrl({
           url: init.url,
           method: init.method,

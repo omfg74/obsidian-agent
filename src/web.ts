@@ -76,7 +76,11 @@ export function parseSearchHtml(html: string): SearchResult[] | null {
   for (const match of collectMatches(SNIPPET_RE, html)) {
     snippets.push(cleanText(match[1]));
   }
-  return titles.map((item, index) => ({ title: item.title, url: item.url, snippet: snippets[index] ?? "" }));
+  if (titles.length === 0) return [];
+  if (snippets.length !== titles.length) {
+    throw new Error("разметка выдачи не распознана: заголовков " + titles.length + ", сниппетов " + snippets.length);
+  }
+  return titles.map((item, index) => ({ title: item.title, url: item.url, snippet: snippets[index] }));
 }
 
 function collectMatches(re: RegExp, html: string): RegExpExecArray[] {
