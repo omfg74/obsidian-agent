@@ -1,7 +1,7 @@
 {
   "id": "obsidian-agent",
   "name": "Агент",
-  "version": "0.1.40",
+  "version": "0.1.41",
   "minAppVersion": "1.5.0",
   "description": "Читает заметки и картинки хранилища, правит текст, убирает файлы в корзину и ищет в сети через OpenAI-совместимый API.",
   "author": "omfg",

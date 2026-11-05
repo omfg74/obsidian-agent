@@ -20,6 +20,7 @@ export default class AgentPlugin extends Plugin {
   focusFollow = true;
   running = false;
   stop = false;
+  requestId = 0;
   view: AgentView | null = null;
 
   async onload() {
@@ -245,8 +246,9 @@ export default class AgentPlugin extends Plugin {
     const prompt = [where, selected ? "Выделение:\n" + selected : "", "Задание:\n" + task].filter(Boolean).join("\n\n");
     session.history.push({ role: "user", content: prompt });
     this.push({ kind: "user", text: task });
-    this.running = true;
     this.stop = false;
+    const requestId = ++this.requestId;
+    this.running = true;
     this.paint();
     const mode = this.settings.mode;
     const tools = visibleTools(mode, this.settings.web);
@@ -259,13 +261,16 @@ export default class AgentPlugin extends Plugin {
         onLine: (line) => this.push({ kind: "tool", text: line }),
         post: async (batch) => {
           const turn = await this.post(provider, model, batch, tools);
+          if (requestId !== this.requestId || this.stop) throw new Error("остановлено");
           if (turn.usage !== null) session.contextUsed = nextContextUsed(turn.usage);
           this.paint();
           return turn;
         },
-        callTool: (name, args) => {
+        callTool: async (name, args) => {
           assertModeTool(mode, name);
-          return dispatchTool(this.vaultFs(), name, args, this.webHttp());
+          const output = await dispatchTool(this.vaultFs(), name, args, this.webHttp());
+          if (requestId !== this.requestId || this.stop) throw new Error("остановлено");
+          return output;
         },
       });
       const last = messages[messages.length - 1];
@@ -714,6 +719,7 @@ class AgentView extends ItemView {
   private onSend() {
     if (this.plugin.running) {
       this.plugin.stop = true;
+      this.plugin.requestId += 1;
       return;
     }
     const text = this.inputEl?.value.trim() ?? "";

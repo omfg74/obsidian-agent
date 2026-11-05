@@ -203,6 +203,123 @@ test("ход показывает finish и длину аргумента", asyn
   ]);
 });
 
+test("стоп не ждёт ответ модели и не записывает его", async () => {
+  let stop = false;
+  const messages: { role: string; content: string }[] = [{ role: "user", content: "привет" }];
+  let late = false;
+  const pending = runAgent({
+    messages,
+    maxSteps: 2,
+    shouldStop: () => stop,
+    post: () => new Promise((resolve) => {
+      setTimeout(() => {
+        late = true;
+        resolve({ content: "поздно", finishReason: "stop", usage: null });
+      }, 300);
+    }),
+    callTool: async () => ({ text: "нет" }),
+  });
+  setTimeout(() => {
+    stop = true;
+  }, 20);
+  const started = Date.now();
+  await assert.rejects(pending, /остановлено/);
+  assert.ok(Date.now() - started < 1000);
+  assert.equal(messages.length, 1);
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  assert.equal(late, true);
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].content, "привет");
+});
+
+test("ответ, пришедший вместе со стопом, в историю не попадает", async () => {
+  let stop = false;
+  const messages: { role: string; content?: string | null }[] = [{ role: "user", content: "привет" }];
+  await assert.rejects(runAgent({
+    messages,
+    maxSteps: 1,
+    shouldStop: () => stop,
+    post: async () => {
+      stop = true;
+      return { content: "не надо", finishReason: "stop", usage: null };
+    },
+    callTool: async () => ({ text: "нет" }),
+  }), /остановлено/);
+  assert.equal(messages.length, 1);
+});
+
+test("ошибка модели не подменяется стопом", async () => {
+  await assert.rejects(runAgent({
+    messages: [{ role: "user", content: "привет" }],
+    maxSteps: 1,
+    shouldStop: () => false,
+    post: async () => {
+      throw new Error("слот занят");
+    },
+    callTool: async () => ({ text: "нет" }),
+  }), /слот занят/);
+});
+
+test("стоп во время инструмента не оставляет вызов без ответа", async () => {
+  let stop = false;
+  const messages: { role: string }[] = [{ role: "user" }];
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const pending = runAgent({
+    messages,
+    maxSteps: 2,
+    shouldStop: () => stop,
+    post: async () => ({
+      content: null,
+      finishReason: "tool_calls",
+      usage: null,
+      tool_calls: [{ id: "1", type: "function", function: { name: "read_note", arguments: "{}" } }],
+    }),
+    callTool: () => {
+      stop = true;
+      return gate.then(() => ({ text: "поздно" }));
+    },
+  });
+  await assert.rejects(pending, /остановлено/);
+  assert.equal(messages.length, 1);
+  release();
+  await gate;
+});
+
+test("стоп после части инструментов закрывает остальные вызовы", async () => {
+  let stop = false;
+  let tools = 0;
+  const messages: { role: string; content?: string; tool_call_id?: string }[] = [{ role: "user", content: "правь" }];
+  await assert.rejects(runAgent({
+    messages,
+    maxSteps: 2,
+    shouldStop: () => stop,
+    onLine: (line) => {
+      if (line.startsWith("read_note:")) stop = true;
+    },
+    post: async () => ({
+      content: null,
+      finishReason: "tool_calls",
+      usage: null,
+      tool_calls: [
+        { id: "1", type: "function", function: { name: "read_note", arguments: "{}" } },
+        { id: "2", type: "function", function: { name: "read_note", arguments: "{}" } },
+      ],
+    }),
+    callTool: async () => {
+      tools += 1;
+      return { text: "первый" };
+    },
+  }), /остановлено/);
+  assert.deepEqual(messages.map((item) => item.role), ["user", "assistant", "tool", "tool"]);
+  assert.equal(messages[2].content, "первый");
+  assert.equal(messages[3].content, "остановлено");
+  assert.equal(messages[3].tool_call_id, "2");
+  assert.equal(tools, 1);
+});
+
 test("длинный результат инструмента в чат не копируется", () => {
   assert.equal(visibleToolResult("read_note", "а".repeat(241)), "read_note: 241 символов");
 });

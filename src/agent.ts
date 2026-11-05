@@ -388,6 +388,64 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+const STOP_POLL_MS = 50;
+
+// requestUrl и CapacitorHttp не принимают отмену: стоп проверяется, пока ждём ответ.
+function watchStop<T>(pending: Promise<T>, shouldStop: (() => boolean) | undefined): Promise<T> {
+  if (!shouldStop) return pending;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let settled = false;
+  const finish = () => {
+    settled = true;
+    if (timer !== undefined) clearTimeout(timer);
+  };
+  return new Promise<T>((resolve, reject) => {
+    const poll = () => {
+      if (settled) return;
+      if (shouldStop()) {
+        finish();
+        reject(new Error("остановлено"));
+        return;
+      }
+      timer = setTimeout(poll, STOP_POLL_MS);
+    };
+    poll();
+    pending.then(
+      (value) => {
+        if (settled) return;
+        finish();
+        if (shouldStop()) reject(new Error("остановлено"));
+        else resolve(value);
+      },
+      (error: unknown) => {
+        if (settled) return;
+        finish();
+        if (shouldStop()) reject(new Error("остановлено"));
+        else reject(error);
+      },
+    );
+  });
+}
+
+function closeStopped(messages: ChatMessage[], checkpoint: number, calls: ToolCall[]): void {
+  const completed = messages.slice(checkpoint + 1).filter((item) => item.role === "tool").length;
+  if (completed === 0) {
+    messages.length = checkpoint;
+    return;
+  }
+  for (let index = completed; index < calls.length; index++) {
+    const id = calls[index].id;
+    if (!id) throw new Error("модель прислала вызов без id");
+    messages.push({ role: "tool", tool_call_id: id, content: "остановлено" });
+  }
+}
+
+function haltIfStopped(shouldStop: (() => boolean) | undefined, messages: ChatMessage[], checkpoint: number | null, calls: ToolCall[]): void {
+  if (!shouldStop?.()) return;
+  if (checkpoint !== null) closeStopped(messages, checkpoint, calls);
+  throw new Error("остановлено");
+}
+
 export async function runAgent(input: {
   messages: ChatMessage[];
   post: (messages: ChatMessage[]) => Promise<AssistantTurn>;
@@ -398,17 +456,19 @@ export async function runAgent(input: {
 }): Promise<ChatMessage[]> {
   const messages = input.messages;
   for (let step = 0; step < input.maxSteps; step++) {
-    if (input.shouldStop?.()) throw new Error("остановлено");
-    const turn = await input.post(messages);
+    haltIfStopped(input.shouldStop, messages, null, []);
+    const turn = await watchStop(input.post(messages), input.shouldStop);
+    haltIfStopped(input.shouldStop, messages, null, []);
     input.onLine?.("finish: " + (turn.finishReason ?? "нет"));
     const calls = turn.tool_calls ?? [];
     if (calls.length === 0) {
       messages.push({ role: "assistant", content: turn.content ?? "" });
       return messages;
     }
+    const checkpoint = messages.length;
     messages.push({ role: "assistant", content: turn.content, tool_calls: calls });
     for (const call of calls) {
-      if (input.shouldStop?.()) throw new Error("остановлено");
+      haltIfStopped(input.shouldStop, messages, checkpoint, calls);
       if (!call.id) throw new Error("модель прислала вызов без id");
       const name = call.function?.name || "";
       const raw = call.function?.arguments;
@@ -416,8 +476,12 @@ export async function runAgent(input: {
       let output: ToolOutput;
       try {
         const args = asRecord(JSON.parse(call.function?.arguments || "{}"));
-        output = await input.callTool(name, args);
+        output = await watchStop(input.callTool(name, args), input.shouldStop);
       } catch (err) {
+        if (input.shouldStop?.()) {
+          closeStopped(messages, checkpoint, calls);
+          throw new Error("остановлено");
+        }
         const message = err instanceof Error ? err.message : String(err);
         output = { text: "ошибка: " + message };
       }
@@ -432,6 +496,7 @@ export async function runAgent(input: {
           ],
         });
       }
+      haltIfStopped(input.shouldStop, messages, checkpoint, calls);
     }
   }
   throw new Error("лимит шагов: " + input.maxSteps);

@@ -365,34 +365,93 @@ function asRecord(value) {
   }
   return value;
 }
+var STOP_POLL_MS = 50;
+function watchStop(pending, shouldStop) {
+  if (!shouldStop) return pending;
+  let timer;
+  let settled = false;
+  const finish = () => {
+    settled = true;
+    if (timer !== void 0) clearTimeout(timer);
+  };
+  return new Promise((resolve, reject) => {
+    const poll = () => {
+      if (settled) return;
+      if (shouldStop()) {
+        finish();
+        reject(new Error("\u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u043E"));
+        return;
+      }
+      timer = setTimeout(poll, STOP_POLL_MS);
+    };
+    poll();
+    pending.then(
+      (value) => {
+        if (settled) return;
+        finish();
+        if (shouldStop()) reject(new Error("\u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u043E"));
+        else resolve(value);
+      },
+      (error) => {
+        if (settled) return;
+        finish();
+        if (shouldStop()) reject(new Error("\u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u043E"));
+        else reject(error);
+      }
+    );
+  });
+}
+function closeStopped(messages, checkpoint, calls) {
+  const completed = messages.slice(checkpoint + 1).filter((item) => item.role === "tool").length;
+  if (completed === 0) {
+    messages.length = checkpoint;
+    return;
+  }
+  for (let index = completed; index < calls.length; index++) {
+    const id = calls[index].id;
+    if (!id) throw new Error("\u043C\u043E\u0434\u0435\u043B\u044C \u043F\u0440\u0438\u0441\u043B\u0430\u043B\u0430 \u0432\u044B\u0437\u043E\u0432 \u0431\u0435\u0437 id");
+    messages.push({ role: "tool", tool_call_id: id, content: "\u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u043E" });
+  }
+}
+function haltIfStopped(shouldStop, messages, checkpoint, calls) {
+  if (!(shouldStop == null ? void 0 : shouldStop())) return;
+  if (checkpoint !== null) closeStopped(messages, checkpoint, calls);
+  throw new Error("\u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u043E");
+}
 async function runAgent(input) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
   const messages = input.messages;
   for (let step = 0; step < input.maxSteps; step++) {
-    if ((_a = input.shouldStop) == null ? void 0 : _a.call(input)) throw new Error("\u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u043E");
-    const turn = await input.post(messages);
-    (_c = input.onLine) == null ? void 0 : _c.call(input, "finish: " + ((_b = turn.finishReason) != null ? _b : "\u043D\u0435\u0442"));
-    const calls = (_d = turn.tool_calls) != null ? _d : [];
+    haltIfStopped(input.shouldStop, messages, null, []);
+    const turn = await watchStop(input.post(messages), input.shouldStop);
+    haltIfStopped(input.shouldStop, messages, null, []);
+    (_b = input.onLine) == null ? void 0 : _b.call(input, "finish: " + ((_a = turn.finishReason) != null ? _a : "\u043D\u0435\u0442"));
+    const calls = (_c = turn.tool_calls) != null ? _c : [];
     if (calls.length === 0) {
-      messages.push({ role: "assistant", content: (_e = turn.content) != null ? _e : "" });
+      messages.push({ role: "assistant", content: (_d = turn.content) != null ? _d : "" });
       return messages;
     }
+    const checkpoint = messages.length;
     messages.push({ role: "assistant", content: turn.content, tool_calls: calls });
     for (const call of calls) {
-      if ((_f = input.shouldStop) == null ? void 0 : _f.call(input)) throw new Error("\u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u043E");
+      haltIfStopped(input.shouldStop, messages, checkpoint, calls);
       if (!call.id) throw new Error("\u043C\u043E\u0434\u0435\u043B\u044C \u043F\u0440\u0438\u0441\u043B\u0430\u043B\u0430 \u0432\u044B\u0437\u043E\u0432 \u0431\u0435\u0437 id");
-      const name = ((_g = call.function) == null ? void 0 : _g.name) || "";
-      const raw = (_h = call.function) == null ? void 0 : _h.arguments;
-      (_i = input.onLine) == null ? void 0 : _i.call(input, "\u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442 " + name + ", \u0430\u0440\u0433\u0443\u043C\u0435\u043D\u0442 " + (typeof raw === "string" ? raw.length + " \u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432" : "\u043D\u0435 \u0441\u0442\u0440\u043E\u043A\u0430"));
+      const name = ((_e = call.function) == null ? void 0 : _e.name) || "";
+      const raw = (_f = call.function) == null ? void 0 : _f.arguments;
+      (_g = input.onLine) == null ? void 0 : _g.call(input, "\u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442 " + name + ", \u0430\u0440\u0433\u0443\u043C\u0435\u043D\u0442 " + (typeof raw === "string" ? raw.length + " \u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432" : "\u043D\u0435 \u0441\u0442\u0440\u043E\u043A\u0430"));
       let output;
       try {
-        const args = asRecord(JSON.parse(((_j = call.function) == null ? void 0 : _j.arguments) || "{}"));
-        output = await input.callTool(name, args);
+        const args = asRecord(JSON.parse(((_h = call.function) == null ? void 0 : _h.arguments) || "{}"));
+        output = await watchStop(input.callTool(name, args), input.shouldStop);
       } catch (err) {
+        if ((_i = input.shouldStop) == null ? void 0 : _i.call(input)) {
+          closeStopped(messages, checkpoint, calls);
+          throw new Error("\u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u043E");
+        }
         const message = err instanceof Error ? err.message : String(err);
         output = { text: "\u043E\u0448\u0438\u0431\u043A\u0430: " + message };
       }
-      (_k = input.onLine) == null ? void 0 : _k.call(input, visibleToolResult(name, output.text));
+      (_j = input.onLine) == null ? void 0 : _j.call(input, visibleToolResult(name, output.text));
       messages.push({ role: "tool", tool_call_id: call.id, content: output.text });
       if (output.image) {
         messages.push({
@@ -403,6 +462,7 @@ async function runAgent(input) {
           ]
         });
       }
+      haltIfStopped(input.shouldStop, messages, checkpoint, calls);
     }
   }
   throw new Error("\u043B\u0438\u043C\u0438\u0442 \u0448\u0430\u0433\u043E\u0432: " + input.maxSteps);
@@ -1421,6 +1481,7 @@ var AgentPlugin = class extends import_obsidian.Plugin {
     this.focusFollow = true;
     this.running = false;
     this.stop = false;
+    this.requestId = 0;
     this.view = null;
   }
   async onload() {
@@ -1636,8 +1697,9 @@ var AgentPlugin = class extends import_obsidian.Plugin {
     const prompt = [where, selected ? "\u0412\u044B\u0434\u0435\u043B\u0435\u043D\u0438\u0435:\n" + selected : "", "\u0417\u0430\u0434\u0430\u043D\u0438\u0435:\n" + task].filter(Boolean).join("\n\n");
     session.history.push({ role: "user", content: prompt });
     this.push({ kind: "user", text: task });
-    this.running = true;
     this.stop = false;
+    const requestId = ++this.requestId;
+    this.running = true;
     this.paint();
     const mode = this.settings.mode;
     const tools = visibleTools(mode, this.settings.web);
@@ -1650,13 +1712,16 @@ var AgentPlugin = class extends import_obsidian.Plugin {
         onLine: (line) => this.push({ kind: "tool", text: line }),
         post: async (batch) => {
           const turn = await this.post(provider, model, batch, tools);
+          if (requestId !== this.requestId || this.stop) throw new Error("\u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u043E");
           if (turn.usage !== null) session.contextUsed = nextContextUsed(turn.usage);
           this.paint();
           return turn;
         },
-        callTool: (name, args) => {
+        callTool: async (name, args) => {
           assertModeTool(mode, name);
-          return dispatchTool(this.vaultFs(), name, args, this.webHttp());
+          const output = await dispatchTool(this.vaultFs(), name, args, this.webHttp());
+          if (requestId !== this.requestId || this.stop) throw new Error("\u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u043E");
+          return output;
         }
       });
       const last = messages[messages.length - 1];
@@ -2087,6 +2152,7 @@ var AgentView = class extends import_obsidian.ItemView {
     var _a, _b;
     if (this.plugin.running) {
       this.plugin.stop = true;
+      this.plugin.requestId += 1;
       return;
     }
     const text = (_b = (_a = this.inputEl) == null ? void 0 : _a.value.trim()) != null ? _b : "";
