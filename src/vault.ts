@@ -1,10 +1,10 @@
+import { IMAGE_BYTES_LIMIT, IMAGE_TOO_BIG, IMAGE_TYPE, bytesToBase64 } from "./attach.ts";
 import { replaceOnce } from "./replace.ts";
 import { extractPageText, formatSearchResults, nonTextContentType, pageUrl, parseSearchHtml, blockedPage, searchQuery, searchUrl, trimFetch } from "./web.ts";
 import type { HttpInit } from "./http.ts";
 
 const TEXT_LIMIT = 100_000;
 const LIST_LIMIT = 200;
-const IMAGE_LIMIT = 4 * 1024 * 1024;
 const FETCH_RESPONSE_LIMIT = 2_000_000;
 
 const IMAGE_MIME: Record<string, string> = {
@@ -61,17 +61,8 @@ function str(args: Record<string, unknown>, key: string): string {
 function imageMime(path: string): string {
   const ext = path.split(".").pop()?.toLowerCase() || "";
   const mime = IMAGE_MIME[ext];
-  if (!mime) throw new Error("модель принимает png, jpeg, gif и webp");
+  if (!mime) throw new Error(IMAGE_TYPE);
   return mime;
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = "";
-  const size = 0x8000;
-  for (let i = 0; i < bytes.length; i += size) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + size));
-  }
-  return btoa(binary);
 }
 
 export async function resolvePath(fs: VaultFs, raw: string): Promise<string> {
@@ -121,7 +112,7 @@ export async function dispatchTool(fs: VaultFs, name: string, args: Record<strin
     const path = await resolvePath(fs, str(args, "path"));
     const mime = imageMime(path);
     const bytes = await fs.bytes(path);
-    if (bytes.byteLength > IMAGE_LIMIT) throw new Error("картинка больше 4 МБ");
+    if (bytes.byteLength > IMAGE_BYTES_LIMIT) throw new Error(IMAGE_TOO_BIG);
     if (bytes.byteLength === 0) throw new Error("файл картинки пустой");
     return { text: "картинка " + path, image: { mime, base64: bytesToBase64(bytes) } };
   }

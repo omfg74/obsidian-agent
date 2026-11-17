@@ -1,4 +1,5 @@
-import { Component, ItemView, MarkdownRenderer, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf, requestUrl, setIcon, setTooltip, type App, type DropdownComponent } from "obsidian";
+import { Component, FuzzySuggestModal, ItemView, MarkdownRenderer, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf, requestUrl, setIcon, setTooltip, type App, type DropdownComponent } from "obsidian";
+import { assertAttachRoom, messageContent, prepareImage, userLine, type Attachment } from "./attach.ts";
 import { assertModeTool, readTurnText, runAgent, systemPrompt, visibleTools, type ChatMessage } from "./agent.ts";
 import { contextLabel, newSession, nextContextUsed, sessionTitle, sessionsFromSaved, stripImages, type ChatLine, type Session } from "./chats.ts";
 import { listedModels, modelMenuLabel, modelNotes, type ListedModel } from "./models.ts";
@@ -217,8 +218,9 @@ export default class AgentPlugin extends Plugin {
     this.paint();
   }
 
-  async ask(task: string) {
+  async ask(task: string, attachments: Attachment[]) {
     if (this.running) return;
+    if (!task && attachments.length === 0) return;
     const session = this.activeSession();
     if (!session) {
       new Notice("нет чата");
@@ -243,9 +245,9 @@ export default class AgentPlugin extends Plugin {
     const view = this.markdownView();
     const selected = view?.file?.path === active ? view.editor.getSelection() : "";
     const where = active ? "Фокус: " + active : "Фокус не выбран.";
-    const prompt = [where, selected ? "Выделение:\n" + selected : "", "Задание:\n" + task].filter(Boolean).join("\n\n");
-    session.history.push({ role: "user", content: prompt });
-    this.push({ kind: "user", text: task });
+    const prompt = [where, selected ? "Выделение:\n" + selected : "", task ? "Задание:\n" + task : ""].filter(Boolean).join("\n\n");
+    session.history.push({ role: "user", content: messageContent(prompt, attachments) });
+    this.push({ kind: "user", text: userLine(task, attachments.map((item) => item.name)) });
     this.stop = false;
     const requestId = ++this.requestId;
     this.running = true;
@@ -486,6 +488,9 @@ class AgentView extends ItemView {
   plugin: AgentPlugin;
   logEl: HTMLElement | null = null;
   inputEl: HTMLTextAreaElement | null = null;
+  attachEl: HTMLElement | null = null;
+  pending: Attachment[] = [];
+  pendingSession = "";
   sendEl: HTMLElement | null = null;
   providerEl: HTMLSelectElement | null = null;
   providerSignature = "";
@@ -550,6 +555,25 @@ class AgentView extends ItemView {
     const composer = root.createDiv({ cls: "agent-composer" });
     const context = composer.createDiv({ cls: "agent-context" });
     iconButton(context, "at-sign", "текущий файл").addEventListener("click", () => void this.plugin.focusOpenNote());
+    const fileHit = context.createDiv({ cls: "agent-file-hit" });
+    const fileMark = fileHit.createDiv({ cls: "clickable-icon agent-icon", attr: { "aria-hidden": "true" } });
+    setIcon(fileMark, "paperclip");
+    setTooltip(fileHit, "выбрать картинку");
+    const fileInput = fileHit.createEl("input", { attr: { type: "file", accept: "image/*", multiple: "multiple", "aria-label": "выбрать картинку" } });
+    fileInput.addEventListener("change", () => {
+      const files = fileInput.files;
+      fileInput.value = "";
+      if (!files || files.length === 0) return;
+      void this.attachFiles(Array.from(files)).catch(noticeError);
+    });
+    iconButton(context, "clipboard", "из буфера").addEventListener("click", () => {
+      void this.attachClipboard();
+    });
+    iconButton(context, "image", "из хранилища").addEventListener("click", () => {
+      new VaultImageModal(this.app, (file) => {
+        void this.attachVaultFile(file).catch(noticeError);
+      }).open();
+    });
     this.chipEl = context.createDiv({ cls: "agent-chip" });
     this.chipLabel = this.chipEl.createSpan();
     const closeChip = iconButton(this.chipEl, "x", "убрать файл");
@@ -559,12 +583,34 @@ class AgentView extends ItemView {
     this.meterLabel = this.meterEl.createSpan({ cls: "agent-meter-label" });
     this.meterBar = this.meterEl.createDiv({ cls: "agent-meter-bar" });
     this.meterFill = this.meterBar.createSpan({ cls: "agent-meter-fill" });
+    this.attachEl = composer.createDiv({ cls: "agent-attachments" });
+    this.attachEl.hidden = true;
     this.inputEl = composer.createEl("textarea", { attr: { rows: "3", placeholder: "Задание для заметки в фокусе" } });
     this.inputEl.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
       if (this.plugin.running) return;
       event.preventDefault();
       this.onSend();
+    });
+    this.inputEl.addEventListener("paste", (event) => this.onPaste(event));
+    composer.addEventListener("dragover", (event) => {
+      if (!dragHasFiles(event)) return;
+      event.preventDefault();
+      composer.addClass("is-drop");
+    });
+    composer.addEventListener("dragleave", (event) => {
+      const next = event.relatedTarget;
+      if (next instanceof Node && composer.contains(next)) return;
+      composer.removeClass("is-drop");
+    });
+    composer.addEventListener("drop", (event) => {
+      composer.removeClass("is-drop");
+      if (!dragHasFiles(event)) return;
+      const files = event.dataTransfer?.files;
+      if (!files || files.length === 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void this.attachFiles(Array.from(files)).catch(noticeError);
     });
     const bar = composer.createDiv({ cls: "agent-composer-bar" });
     const modeEl = picker(bar);
@@ -615,6 +661,7 @@ class AgentView extends ItemView {
 
   async onClose() {
     this.clearLogRender();
+    this.pending = [];
     document.removeEventListener("pointerdown", this.closeModelMenu);
     if (this.plugin.view === this) this.plugin.view = null;
   }
@@ -630,6 +677,11 @@ class AgentView extends ItemView {
 
   paint() {
     if (!this.logEl || !this.sendEl) return;
+    if (this.pendingSession !== this.plugin.sessionId) {
+      this.pending = [];
+      this.pendingSession = this.plugin.sessionId;
+      this.syncAttachments();
+    }
     if (this.plugin.focusFollow) {
       const path = this.plugin.openNotePath();
       if (path && path !== this.plugin.focusPath) {
@@ -723,9 +775,82 @@ class AgentView extends ItemView {
       return;
     }
     const text = this.inputEl?.value.trim() ?? "";
-    if (!text) return;
+    const attachments = this.pending.slice();
+    if (!text && attachments.length === 0) return;
+    if (attachments.length > 0) {
+      const model = this.activeListedModel();
+      if (model?.images === false) {
+        new Notice("модель " + model.id + " без картинок");
+        return;
+      }
+    }
     if (this.inputEl) this.inputEl.value = "";
-    void this.plugin.ask(text);
+    this.pending = [];
+    this.syncAttachments();
+    void this.plugin.ask(text, attachments);
+  }
+
+  private onPaste(event: ClipboardEvent) {
+    const files = pastedFiles(event.clipboardData);
+    if (files.length === 0) return;
+    event.preventDefault();
+    void this.attachFiles(files).catch(noticeError);
+  }
+
+  private async attachClipboard() {
+    try {
+      await this.attachFiles(await clipboardImages());
+    } catch (err) {
+      noticeError(err);
+    }
+  }
+
+  private async attachVaultFile(file: TFile) {
+    const sessionId = this.plugin.sessionId;
+    assertAttachRoom(this.pending.length, 1);
+    const bytes = new Uint8Array(await this.app.vault.readBinary(file));
+    const attachment = await prepareImage(file.name, bytes, heicToJpeg);
+    if (this.plugin.sessionId !== sessionId) throw new Error("чат сменился");
+    assertAttachRoom(this.pending.length, 1);
+    this.pending.push(attachment);
+    this.syncAttachments();
+  }
+
+  private async attachFiles(files: File[]) {
+    const sessionId = this.plugin.sessionId;
+    if (files.length === 0) return;
+    assertAttachRoom(this.pending.length, files.length);
+    const prepared: Attachment[] = [];
+    for (const file of files) prepared.push(await prepareImage(file.name, new Uint8Array(await file.arrayBuffer()), heicToJpeg));
+    if (this.plugin.sessionId !== sessionId) throw new Error("чат сменился");
+    assertAttachRoom(this.pending.length, prepared.length);
+    this.pending.push(...prepared);
+    this.syncAttachments();
+  }
+
+  private syncAttachments() {
+    const host = this.attachEl;
+    if (!host) return;
+    host.empty();
+    host.hidden = this.pending.length === 0;
+    for (const item of this.pending) {
+      const chip = host.createDiv({ cls: "agent-attach" });
+      chip.createEl("img", { attr: { src: "data:" + item.mime + ";base64," + item.base64, alt: "" } });
+      chip.createSpan({ text: item.name });
+      iconButton(chip, "x", "убрать " + item.name).addEventListener("click", () => {
+        this.pending = this.pending.filter((other) => other !== item);
+        this.syncAttachments();
+      });
+    }
+  }
+
+  private activeListedModel(): ListedModel | undefined {
+    const provider = this.plugin.activeProvider();
+    const state = this.modelState;
+    if (!provider || !state || state.providerId !== provider.id || !("models" in state)) return;
+    const id = provider.model.trim();
+    if (!id) return;
+    return state.models.find((item) => item.id === id);
   }
 
   private syncMode() {
@@ -1083,5 +1208,103 @@ class AgentSettingTab extends PluginSettingTab {
       setting.setDesc(message);
       new Notice(message);
     }
+  }
+}
+
+const VAULT_IMAGE = /^(png|jpe?g|gif|webp|heic|heif)$/i;
+
+class VaultImageModal extends FuzzySuggestModal<TFile> {
+  private readonly onPick: (file: TFile) => void;
+
+  constructor(app: App, onPick: (file: TFile) => void) {
+    super(app);
+    this.onPick = onPick;
+    this.emptyStateText = "в хранилище нет такой картинки";
+    this.setPlaceholder("картинка в хранилище");
+  }
+
+  getItems(): TFile[] {
+    return this.app.vault.getFiles().filter((file) => VAULT_IMAGE.test(file.extension));
+  }
+
+  getItemText(file: TFile): string {
+    return file.path;
+  }
+
+  onChooseItem(file: TFile): void {
+    this.onPick(file);
+  }
+}
+
+function noticeError(err: unknown) {
+  const message = err instanceof Error ? err.message : String(err);
+  new Notice(message || "не удалось приложить файл");
+}
+
+function dragHasFiles(event: DragEvent): boolean {
+  const types = event.dataTransfer?.types;
+  if (!types) return false;
+  return Array.from(types).includes("Files");
+}
+
+function pastedFiles(data: DataTransfer | null): File[] {
+  if (!data) return [];
+  const fromList = Array.from(data.files);
+  if (fromList.length > 0) return fromList;
+  const out: File[] = [];
+  for (const item of Array.from(data.items)) {
+    if (item.kind !== "file") continue;
+    const file = item.getAsFile();
+    if (file) out.push(file);
+  }
+  return out;
+}
+
+async function clipboardImages(): Promise<File[]> {
+  const read = navigator.clipboard?.read;
+  if (typeof read !== "function") throw new Error("буфер обмена недоступен");
+  const items = await read.call(navigator.clipboard);
+  const files: File[] = [];
+  for (const item of items) {
+    const type = item.types.find((entry) => entry.startsWith("image/"));
+    if (!type) continue;
+    const blob = await item.getType(type);
+    files.push(new File([blob], "буфер." + clipboardExt(type), { type }));
+  }
+  if (files.length === 0) throw new Error("в буфере нет картинки");
+  return files;
+}
+
+function clipboardExt(type: string): string {
+  const subtype = type.slice("image/".length).toLowerCase().replace(/[^a-z0-9]+/g, "");
+  if (subtype === "jpeg") return "jpg";
+  if (!subtype) return "img";
+  return subtype;
+}
+
+async function heicToJpeg(bytes: Uint8Array): Promise<Uint8Array> {
+  if (typeof createImageBitmap !== "function") throw new Error("HEIC это устройство не открывает");
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(new Blob([copy], { type: "image/heic" }));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error("HEIC это устройство не открывает" + (message ? ": " + message : ""));
+  }
+  try {
+    if (bitmap.width < 1 || bitmap.height < 1) throw new Error("HEIC не удалось перекодировать");
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("HEIC не удалось перекодировать");
+    ctx.drawImage(bitmap, 0, 0);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+    if (!blob) throw new Error("HEIC не удалось перекодировать");
+    return new Uint8Array(await blob.arrayBuffer());
+  } finally {
+    bitmap.close();
   }
 }

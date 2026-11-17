@@ -25,6 +25,113 @@ __export(main_exports, {
 module.exports = __toCommonJS(main_exports);
 var import_obsidian = require("obsidian");
 
+// src/attach.ts
+var IMAGE_BYTES_LIMIT = 4 * 1024 * 1024;
+var ATTACH_LIMIT = 4;
+var IMAGE_TOO_BIG = "\u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0430 \u0431\u043E\u043B\u044C\u0448\u0435 4 \u041C\u0411";
+var IMAGE_TYPE = "\u043C\u043E\u0434\u0435\u043B\u044C \u043F\u0440\u0438\u043D\u0438\u043C\u0430\u0435\u0442 png, jpeg, gif \u0438 webp";
+var EXT = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp"
+};
+var HEIC_BRAND = /* @__PURE__ */ new Set(["heic", "heix", "hevc", "hevx", "heim", "heis", "heif", "mif1", "msf1"]);
+function assertAttachRoom(have, adding) {
+  if (have + adding > ATTACH_LIMIT) throw new Error("\u0431\u043E\u043B\u044C\u0448\u0435 \u0447\u0435\u0442\u044B\u0440\u0451\u0445 \u043A\u0430\u0440\u0442\u0438\u043D\u043E\u043A");
+}
+async function prepareImage(name, bytes, decodeHeic) {
+  if (bytes.byteLength === 0) throw new Error("\u0444\u0430\u0439\u043B \u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0438 \u043F\u0443\u0441\u0442\u043E\u0439");
+  const kind = sniff(bytes);
+  if (kind === "heic") return prepareHeic(name, bytes, decodeHeic);
+  if (bytes.byteLength > IMAGE_BYTES_LIMIT) throw new Error(IMAGE_TOO_BIG);
+  return { name: displayName(name, kind), mime: kind, base64: bytesToBase64(bytes) };
+}
+function messageContent(prompt, attachments) {
+  if (attachments.length === 0) return prompt;
+  const names = attachments.map((item) => item.name).join(", ");
+  const note = "\u041A\u0430\u0440\u0442\u0438\u043D\u043A\u0438 \u0432\u043E \u0432\u043B\u043E\u0436\u0435\u043D\u0438\u0438: " + names + ". \u041E\u043D\u0438 \u0443\u0436\u0435 \u0432 \u044D\u0442\u043E\u043C \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0438, view_image \u0434\u043B\u044F \u043D\u0438\u0445 \u043D\u0435 \u0432\u044B\u0437\u044B\u0432\u0430\u0439.";
+  const text = prompt ? prompt + "\n\n" + note : note;
+  return [{ type: "text", text }, ...attachments.map(imagePart)];
+}
+function userLine(task, names) {
+  if (names.length === 0) return task;
+  const files = names.join(", ");
+  if (!task) return files;
+  return task + "\n" + files;
+}
+function bytesToBase64(bytes) {
+  let binary = "";
+  const size = 32768;
+  for (let i = 0; i < bytes.length; i += size) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + size));
+  }
+  return btoa(binary);
+}
+async function prepareHeic(name, bytes, decodeHeic) {
+  if (bytes.byteLength > IMAGE_BYTES_LIMIT) throw new Error(IMAGE_TOO_BIG);
+  const jpeg = await decodeHeic(bytes);
+  if (!isJpeg(jpeg)) throw new Error("HEIC \u043D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u0435\u0440\u0435\u043A\u043E\u0434\u0438\u0440\u043E\u0432\u0430\u0442\u044C");
+  if (jpeg.byteLength > IMAGE_BYTES_LIMIT) throw new Error(IMAGE_TOO_BIG);
+  return { name: jpegName(name), mime: "image/jpeg", base64: bytesToBase64(jpeg) };
+}
+function imagePart(item) {
+  return { type: "image_url", image_url: { url: "data:" + item.mime + ";base64," + item.base64 } };
+}
+function sniff(bytes) {
+  if (isPng(bytes)) return "image/png";
+  if (isJpeg(bytes)) return "image/jpeg";
+  if (isGif(bytes)) return "image/gif";
+  if (isWebp(bytes)) return "image/webp";
+  if (isHeic(bytes)) return "heic";
+  throw new Error(IMAGE_TYPE);
+}
+function isPng(bytes) {
+  return bytes.length >= 8 && bytes[0] === 137 && bytes[1] === 80 && bytes[2] === 78 && bytes[3] === 71 && bytes[4] === 13 && bytes[5] === 10 && bytes[6] === 26 && bytes[7] === 10;
+}
+function isJpeg(bytes) {
+  return bytes.length >= 3 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
+}
+function isGif(bytes) {
+  if (bytes.length < 6) return false;
+  const header = ascii(bytes, 0, 6);
+  return header === "GIF87a" || header === "GIF89a";
+}
+function isWebp(bytes) {
+  return bytes.length >= 12 && ascii(bytes, 0, 4) === "RIFF" && ascii(bytes, 8, 12) === "WEBP";
+}
+function isHeic(bytes) {
+  if (bytes.length < 12 || ascii(bytes, 4, 8) !== "ftyp") return false;
+  if (HEIC_BRAND.has(ascii(bytes, 8, 12))) return true;
+  const end = Math.min(bytes.length, 32);
+  for (let i = 16; i + 4 <= end; i += 4) {
+    if (HEIC_BRAND.has(ascii(bytes, i, i + 4))) return true;
+  }
+  return false;
+}
+function ascii(bytes, from, to) {
+  let text = "";
+  for (let i = from; i < to; i++) text += String.fromCharCode(bytes[i]);
+  return text;
+}
+function displayName(name, mime) {
+  const base = fileTitle(name);
+  if (base) return base;
+  return "\u0432\u043B\u043E\u0436\u0435\u043D\u0438\u0435." + EXT[mime];
+}
+function jpegName(name) {
+  const base = fileTitle(name).replace(/\.[^.]+$/, "");
+  if (!base) return "\u0432\u043B\u043E\u0436\u0435\u043D\u0438\u0435.jpg";
+  return base + ".jpg";
+}
+function fileTitle(name) {
+  var _a, _b;
+  const base = (_b = (_a = name.trim().split(/[/\\]/).pop()) == null ? void 0 : _a.trim()) != null ? _b : "";
+  if (!base || base === "." || base === "..") return "";
+  if (base.length <= 80) return base;
+  return base.slice(0, 80);
+}
+
 // src/agent.ts
 var TOOLS = [
   {
@@ -164,7 +271,7 @@ function assertModeTool(mode, name) {
   throw new Error("\u0440\u0435\u0436\u0438\u043C " + mode + " \u043D\u0435 \u0434\u0430\u0451\u0442 " + name);
 }
 function systemPrompt(activePath, mode, web) {
-  const parts = [modeRules(mode), focusLine(activePath, mode), readable(mode)];
+  const parts = [modeRules(mode), focusLine(activePath, mode), "\u041A\u0430\u0440\u0442\u0438\u043D\u043A\u0430 \u0432\u043E \u0432\u043B\u043E\u0436\u0435\u043D\u0438\u0438 \u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044F \u0443\u0436\u0435 \u043B\u0435\u0436\u0438\u0442 \u0432 \u0435\u0433\u043E \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0438. view_image \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0443 \u0438\u0437 \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0430.", readable(mode)];
   if (web) parts.push(webRules(mode));
   return parts.join("\n");
 }
@@ -1319,7 +1426,6 @@ function nonTextContentType(contentType) {
 // src/vault.ts
 var TEXT_LIMIT = 1e5;
 var LIST_LIMIT = 200;
-var IMAGE_LIMIT = 4 * 1024 * 1024;
 var FETCH_RESPONSE_LIMIT = 2e6;
 var IMAGE_MIME = {
   png: "image/png",
@@ -1359,16 +1465,8 @@ function imageMime(path) {
   var _a;
   const ext = ((_a = path.split(".").pop()) == null ? void 0 : _a.toLowerCase()) || "";
   const mime = IMAGE_MIME[ext];
-  if (!mime) throw new Error("\u043C\u043E\u0434\u0435\u043B\u044C \u043F\u0440\u0438\u043D\u0438\u043C\u0430\u0435\u0442 png, jpeg, gif \u0438 webp");
+  if (!mime) throw new Error(IMAGE_TYPE);
   return mime;
-}
-function bytesToBase64(bytes) {
-  let binary = "";
-  const size = 32768;
-  for (let i = 0; i < bytes.length; i += size) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + size));
-  }
-  return btoa(binary);
 }
 async function resolvePath(fs, raw) {
   const name = raw.trim().replace(/^\[\[/, "").replace(/\]\]$/, "").replace(/^\//, "");
@@ -1412,7 +1510,7 @@ async function dispatchTool(fs, name, args, web) {
     const path = await resolvePath(fs, str(args, "path"));
     const mime = imageMime(path);
     const bytes = await fs.bytes(path);
-    if (bytes.byteLength > IMAGE_LIMIT) throw new Error("\u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0430 \u0431\u043E\u043B\u044C\u0448\u0435 4 \u041C\u0411");
+    if (bytes.byteLength > IMAGE_BYTES_LIMIT) throw new Error(IMAGE_TOO_BIG);
     if (bytes.byteLength === 0) throw new Error("\u0444\u0430\u0439\u043B \u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0438 \u043F\u0443\u0441\u0442\u043E\u0439");
     return { text: "\u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0430 " + path, image: { mime, base64: bytesToBase64(bytes) } };
   }
@@ -1667,9 +1765,10 @@ var AgentPlugin = class extends import_obsidian.Plugin {
     if (line.kind === "user") session.title = sessionTitle(session.lines);
     this.paint();
   }
-  async ask(task) {
+  async ask(task, attachments) {
     var _a;
     if (this.running) return;
+    if (!task && attachments.length === 0) return;
     const session = this.activeSession();
     if (!session) {
       new import_obsidian.Notice("\u043D\u0435\u0442 \u0447\u0430\u0442\u0430");
@@ -1694,9 +1793,9 @@ var AgentPlugin = class extends import_obsidian.Plugin {
     const view = this.markdownView();
     const selected = ((_a = view == null ? void 0 : view.file) == null ? void 0 : _a.path) === active ? view.editor.getSelection() : "";
     const where = active ? "\u0424\u043E\u043A\u0443\u0441: " + active : "\u0424\u043E\u043A\u0443\u0441 \u043D\u0435 \u0432\u044B\u0431\u0440\u0430\u043D.";
-    const prompt = [where, selected ? "\u0412\u044B\u0434\u0435\u043B\u0435\u043D\u0438\u0435:\n" + selected : "", "\u0417\u0430\u0434\u0430\u043D\u0438\u0435:\n" + task].filter(Boolean).join("\n\n");
-    session.history.push({ role: "user", content: prompt });
-    this.push({ kind: "user", text: task });
+    const prompt = [where, selected ? "\u0412\u044B\u0434\u0435\u043B\u0435\u043D\u0438\u0435:\n" + selected : "", task ? "\u0417\u0430\u0434\u0430\u043D\u0438\u0435:\n" + task : ""].filter(Boolean).join("\n\n");
+    session.history.push({ role: "user", content: messageContent(prompt, attachments) });
+    this.push({ kind: "user", text: userLine(task, attachments.map((item) => item.name)) });
     this.stop = false;
     const requestId = ++this.requestId;
     this.running = true;
@@ -1930,6 +2029,9 @@ var AgentView = class extends import_obsidian.ItemView {
     super(leaf);
     this.logEl = null;
     this.inputEl = null;
+    this.attachEl = null;
+    this.pending = [];
+    this.pendingSession = "";
     this.sendEl = null;
     this.providerEl = null;
     this.providerSignature = "";
@@ -1998,6 +2100,25 @@ var AgentView = class extends import_obsidian.ItemView {
     const composer = root.createDiv({ cls: "agent-composer" });
     const context = composer.createDiv({ cls: "agent-context" });
     iconButton(context, "at-sign", "\u0442\u0435\u043A\u0443\u0449\u0438\u0439 \u0444\u0430\u0439\u043B").addEventListener("click", () => void this.plugin.focusOpenNote());
+    const fileHit = context.createDiv({ cls: "agent-file-hit" });
+    const fileMark = fileHit.createDiv({ cls: "clickable-icon agent-icon", attr: { "aria-hidden": "true" } });
+    (0, import_obsidian.setIcon)(fileMark, "paperclip");
+    (0, import_obsidian.setTooltip)(fileHit, "\u0432\u044B\u0431\u0440\u0430\u0442\u044C \u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0443");
+    const fileInput = fileHit.createEl("input", { attr: { type: "file", accept: "image/*", multiple: "multiple", "aria-label": "\u0432\u044B\u0431\u0440\u0430\u0442\u044C \u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0443" } });
+    fileInput.addEventListener("change", () => {
+      const files = fileInput.files;
+      fileInput.value = "";
+      if (!files || files.length === 0) return;
+      void this.attachFiles(Array.from(files)).catch(noticeError);
+    });
+    iconButton(context, "clipboard", "\u0438\u0437 \u0431\u0443\u0444\u0435\u0440\u0430").addEventListener("click", () => {
+      void this.attachClipboard();
+    });
+    iconButton(context, "image", "\u0438\u0437 \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0430").addEventListener("click", () => {
+      new VaultImageModal(this.app, (file) => {
+        void this.attachVaultFile(file).catch(noticeError);
+      }).open();
+    });
     this.chipEl = context.createDiv({ cls: "agent-chip" });
     this.chipLabel = this.chipEl.createSpan();
     const closeChip = iconButton(this.chipEl, "x", "\u0443\u0431\u0440\u0430\u0442\u044C \u0444\u0430\u0439\u043B");
@@ -2007,12 +2128,35 @@ var AgentView = class extends import_obsidian.ItemView {
     this.meterLabel = this.meterEl.createSpan({ cls: "agent-meter-label" });
     this.meterBar = this.meterEl.createDiv({ cls: "agent-meter-bar" });
     this.meterFill = this.meterBar.createSpan({ cls: "agent-meter-fill" });
+    this.attachEl = composer.createDiv({ cls: "agent-attachments" });
+    this.attachEl.hidden = true;
     this.inputEl = composer.createEl("textarea", { attr: { rows: "3", placeholder: "\u0417\u0430\u0434\u0430\u043D\u0438\u0435 \u0434\u043B\u044F \u0437\u0430\u043C\u0435\u0442\u043A\u0438 \u0432 \u0444\u043E\u043A\u0443\u0441\u0435" } });
     this.inputEl.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
       if (this.plugin.running) return;
       event.preventDefault();
       this.onSend();
+    });
+    this.inputEl.addEventListener("paste", (event) => this.onPaste(event));
+    composer.addEventListener("dragover", (event) => {
+      if (!dragHasFiles(event)) return;
+      event.preventDefault();
+      composer.addClass("is-drop");
+    });
+    composer.addEventListener("dragleave", (event) => {
+      const next = event.relatedTarget;
+      if (next instanceof Node && composer.contains(next)) return;
+      composer.removeClass("is-drop");
+    });
+    composer.addEventListener("drop", (event) => {
+      var _a2;
+      composer.removeClass("is-drop");
+      if (!dragHasFiles(event)) return;
+      const files = (_a2 = event.dataTransfer) == null ? void 0 : _a2.files;
+      if (!files || files.length === 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void this.attachFiles(Array.from(files)).catch(noticeError);
     });
     const bar = composer.createDiv({ cls: "agent-composer-bar" });
     const modeEl = picker(bar);
@@ -2063,12 +2207,18 @@ var AgentView = class extends import_obsidian.ItemView {
   }
   async onClose() {
     this.clearLogRender();
+    this.pending = [];
     document.removeEventListener("pointerdown", this.closeModelMenu);
     if (this.plugin.view === this) this.plugin.view = null;
   }
   paint() {
     var _a;
     if (!this.logEl || !this.sendEl) return;
+    if (this.pendingSession !== this.plugin.sessionId) {
+      this.pending = [];
+      this.pendingSession = this.plugin.sessionId;
+      this.syncAttachments();
+    }
     if (this.plugin.focusFollow) {
       const path = this.plugin.openNotePath();
       if (path && path !== this.plugin.focusPath) {
@@ -2156,9 +2306,76 @@ var AgentView = class extends import_obsidian.ItemView {
       return;
     }
     const text = (_b = (_a = this.inputEl) == null ? void 0 : _a.value.trim()) != null ? _b : "";
-    if (!text) return;
+    const attachments = this.pending.slice();
+    if (!text && attachments.length === 0) return;
+    if (attachments.length > 0) {
+      const model = this.activeListedModel();
+      if ((model == null ? void 0 : model.images) === false) {
+        new import_obsidian.Notice("\u043C\u043E\u0434\u0435\u043B\u044C " + model.id + " \u0431\u0435\u0437 \u043A\u0430\u0440\u0442\u0438\u043D\u043E\u043A");
+        return;
+      }
+    }
     if (this.inputEl) this.inputEl.value = "";
-    void this.plugin.ask(text);
+    this.pending = [];
+    this.syncAttachments();
+    void this.plugin.ask(text, attachments);
+  }
+  onPaste(event) {
+    const files = pastedFiles(event.clipboardData);
+    if (files.length === 0) return;
+    event.preventDefault();
+    void this.attachFiles(files).catch(noticeError);
+  }
+  async attachClipboard() {
+    try {
+      await this.attachFiles(await clipboardImages());
+    } catch (err) {
+      noticeError(err);
+    }
+  }
+  async attachVaultFile(file) {
+    const sessionId = this.plugin.sessionId;
+    assertAttachRoom(this.pending.length, 1);
+    const bytes = new Uint8Array(await this.app.vault.readBinary(file));
+    const attachment = await prepareImage(file.name, bytes, heicToJpeg);
+    if (this.plugin.sessionId !== sessionId) throw new Error("\u0447\u0430\u0442 \u0441\u043C\u0435\u043D\u0438\u043B\u0441\u044F");
+    assertAttachRoom(this.pending.length, 1);
+    this.pending.push(attachment);
+    this.syncAttachments();
+  }
+  async attachFiles(files) {
+    const sessionId = this.plugin.sessionId;
+    if (files.length === 0) return;
+    assertAttachRoom(this.pending.length, files.length);
+    const prepared = [];
+    for (const file of files) prepared.push(await prepareImage(file.name, new Uint8Array(await file.arrayBuffer()), heicToJpeg));
+    if (this.plugin.sessionId !== sessionId) throw new Error("\u0447\u0430\u0442 \u0441\u043C\u0435\u043D\u0438\u043B\u0441\u044F");
+    assertAttachRoom(this.pending.length, prepared.length);
+    this.pending.push(...prepared);
+    this.syncAttachments();
+  }
+  syncAttachments() {
+    const host = this.attachEl;
+    if (!host) return;
+    host.empty();
+    host.hidden = this.pending.length === 0;
+    for (const item of this.pending) {
+      const chip = host.createDiv({ cls: "agent-attach" });
+      chip.createEl("img", { attr: { src: "data:" + item.mime + ";base64," + item.base64, alt: "" } });
+      chip.createSpan({ text: item.name });
+      iconButton(chip, "x", "\u0443\u0431\u0440\u0430\u0442\u044C " + item.name).addEventListener("click", () => {
+        this.pending = this.pending.filter((other) => other !== item);
+        this.syncAttachments();
+      });
+    }
+  }
+  activeListedModel() {
+    const provider = this.plugin.activeProvider();
+    const state = this.modelState;
+    if (!provider || !state || state.providerId !== provider.id || !("models" in state)) return;
+    const id = provider.model.trim();
+    if (!id) return;
+    return state.models.find((item) => item.id === id);
   }
   syncMode() {
     const select = this.modeEl;
@@ -2484,3 +2701,90 @@ var AgentSettingTab = class extends import_obsidian.PluginSettingTab {
     }
   }
 };
+var VAULT_IMAGE = /^(png|jpe?g|gif|webp|heic|heif)$/i;
+var VaultImageModal = class extends import_obsidian.FuzzySuggestModal {
+  constructor(app, onPick) {
+    super(app);
+    this.onPick = onPick;
+    this.emptyStateText = "\u0432 \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435 \u043D\u0435\u0442 \u0442\u0430\u043A\u043E\u0439 \u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0438";
+    this.setPlaceholder("\u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0430 \u0432 \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435");
+  }
+  getItems() {
+    return this.app.vault.getFiles().filter((file) => VAULT_IMAGE.test(file.extension));
+  }
+  getItemText(file) {
+    return file.path;
+  }
+  onChooseItem(file) {
+    this.onPick(file);
+  }
+};
+function noticeError(err) {
+  const message = err instanceof Error ? err.message : String(err);
+  new import_obsidian.Notice(message || "\u043D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u0440\u0438\u043B\u043E\u0436\u0438\u0442\u044C \u0444\u0430\u0439\u043B");
+}
+function dragHasFiles(event) {
+  var _a;
+  const types = (_a = event.dataTransfer) == null ? void 0 : _a.types;
+  if (!types) return false;
+  return Array.from(types).includes("Files");
+}
+function pastedFiles(data) {
+  if (!data) return [];
+  const fromList = Array.from(data.files);
+  if (fromList.length > 0) return fromList;
+  const out = [];
+  for (const item of Array.from(data.items)) {
+    if (item.kind !== "file") continue;
+    const file = item.getAsFile();
+    if (file) out.push(file);
+  }
+  return out;
+}
+async function clipboardImages() {
+  var _a;
+  const read = (_a = navigator.clipboard) == null ? void 0 : _a.read;
+  if (typeof read !== "function") throw new Error("\u0431\u0443\u0444\u0435\u0440 \u043E\u0431\u043C\u0435\u043D\u0430 \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D");
+  const items = await read.call(navigator.clipboard);
+  const files = [];
+  for (const item of items) {
+    const type = item.types.find((entry) => entry.startsWith("image/"));
+    if (!type) continue;
+    const blob = await item.getType(type);
+    files.push(new File([blob], "\u0431\u0443\u0444\u0435\u0440." + clipboardExt(type), { type }));
+  }
+  if (files.length === 0) throw new Error("\u0432 \u0431\u0443\u0444\u0435\u0440\u0435 \u043D\u0435\u0442 \u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0438");
+  return files;
+}
+function clipboardExt(type) {
+  const subtype = type.slice("image/".length).toLowerCase().replace(/[^a-z0-9]+/g, "");
+  if (subtype === "jpeg") return "jpg";
+  if (!subtype) return "img";
+  return subtype;
+}
+async function heicToJpeg(bytes) {
+  if (typeof createImageBitmap !== "function") throw new Error("HEIC \u044D\u0442\u043E \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E \u043D\u0435 \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u0435\u0442");
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(new Blob([copy], { type: "image/heic" }));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error("HEIC \u044D\u0442\u043E \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E \u043D\u0435 \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u0435\u0442" + (message ? ": " + message : ""));
+  }
+  try {
+    if (bitmap.width < 1 || bitmap.height < 1) throw new Error("HEIC \u043D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u0435\u0440\u0435\u043A\u043E\u0434\u0438\u0440\u043E\u0432\u0430\u0442\u044C");
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("HEIC \u043D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u0435\u0440\u0435\u043A\u043E\u0434\u0438\u0440\u043E\u0432\u0430\u0442\u044C");
+    ctx.drawImage(bitmap, 0, 0);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+    if (!blob) throw new Error("HEIC \u043D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u0435\u0440\u0435\u043A\u043E\u0434\u0438\u0440\u043E\u0432\u0430\u0442\u044C");
+    return new Uint8Array(await blob.arrayBuffer());
+  } finally {
+    bitmap.close();
+  }
+}

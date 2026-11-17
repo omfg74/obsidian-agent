@@ -171,7 +171,7 @@ export function assertModeTool(mode: AgentMode, name: string): void {
 }
 
 export function systemPrompt(activePath: string, mode: AgentMode, web: boolean): string {
-  const parts = [modeRules(mode), focusLine(activePath, mode), readable(mode)];
+  const parts = [modeRules(mode), focusLine(activePath, mode), "Картинка во вложении пользователя уже лежит в его сообщении. view_image открывает только картинку из хранилища.", readable(mode)];
   if (web) parts.push(webRules(mode));
   return parts.join("\n");
 }

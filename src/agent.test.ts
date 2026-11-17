@@ -4,6 +4,11 @@ import { assertModeTool, readTurn, readTurnText, runAgent, systemPrompt, TOOLS, 
 import { replaceOnce } from "./replace.ts";
 import { dispatchTool, resolvePath, type VaultFs } from "./vault.ts";
 
+test("вложение в сообщении не требует view_image", () => {
+  assert.match(systemPrompt("а.md", "chat", false), /уже лежит в его сообщении/);
+  assert.match(systemPrompt("а.md", "write", false), /только картинку из хранилища/);
+});
+
 test("открытая заметка названа в подсказке", () => {
   const prompt = systemPrompt("уг.md", "all", true);
   assert.match(prompt, /Фокус: уг\.md/);
