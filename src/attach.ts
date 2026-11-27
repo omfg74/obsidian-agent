@@ -58,6 +58,18 @@ export function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
+export function base64ToBytes(base64: string): Uint8Array {
+  let binary: string;
+  try {
+    binary = atob(base64);
+  } catch {
+    throw new Error("вложение повреждено");
+  }
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
 async function prepareHeic(name: string, bytes: Uint8Array, decodeHeic: (bytes: Uint8Array) => Promise<Uint8Array>): Promise<Attachment> {
   if (bytes.byteLength > IMAGE_BYTES_LIMIT) throw new Error(IMAGE_TOO_BIG);
   const jpeg = await decodeHeic(bytes);

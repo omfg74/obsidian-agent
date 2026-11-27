@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { assertModeTool, readTurn, readTurnText, runAgent, systemPrompt, TOOLS, toolsForMode, visibleToolResult, visibleTools } from "./agent.ts";
 import { replaceOnce } from "./replace.ts";
+import { bytesToBase64, type Attachment } from "./attach.ts";
 import { dispatchTool, resolvePath, type VaultFs } from "./vault.ts";
 
 test("вложение в сообщении не требует view_image", () => {
@@ -21,7 +22,7 @@ test("открытая заметка названа в подсказке", () 
 test("режим ограничивает инструменты", () => {
   const names = (mode: "chat" | "write" | "delete" | "all") => toolsForMode(mode).map((tool) => tool.function.name);
   assert.deepEqual(names("chat"), ["read_note", "list_folder", "view_image", "web_search", "fetch_url"]);
-  assert.deepEqual(names("write"), ["read_note", "view_image", "search_replace", "write_note", "web_search", "fetch_url"]);
+  assert.deepEqual(names("write"), ["read_note", "view_image", "search_replace", "write_note", "append_note", "save_attachment", "web_search", "fetch_url"]);
   assert.deepEqual(names("delete"), ["read_note", "list_folder", "view_image", "delete_note", "web_search", "fetch_url"]);
   assert.deepEqual(toolsForMode("all"), TOOLS);
   assert.throws(() => assertModeTool("chat", "write_note"), /режим chat не даёт write_note/);
@@ -44,7 +45,7 @@ test("web-инструменты видны по тумблеру, осталь�
     }
   }
   assert.deepEqual(names("chat", false), ["read_note", "list_folder", "view_image"]);
-  assert.deepEqual(names("write", false), ["read_note", "view_image", "search_replace", "write_note"]);
+  assert.deepEqual(names("write", false), ["read_note", "view_image", "search_replace", "write_note", "append_note", "save_attachment"]);
   assert.deepEqual(names("delete", false), ["read_note", "list_folder", "view_image", "delete_note"]);
   assert.equal(visibleTools("all", true).length, TOOLS.length);
   assert.equal(visibleTools("all", false).length, TOOLS.length - 2);
@@ -81,11 +82,14 @@ test("подсказка режима говорит, что можно", () => 
   const write = systemPrompt("а.md", "write", false);
   assert.match(write, /Режим write/);
   assert.match(write, /создание папок недоступны/);
+  assert.match(write, /append_note дописывает/);
+  assert.match(write, /save_attachment кладёт/);
   assert.match(write, /Фокус: а\.md/);
+  assert.match(systemPrompt("", "all", false), /сначала create_folder/);
   const del = systemPrompt("а.md", "delete", false);
   assert.match(del, /Режим delete/);
   assert.match(del, /в корзину/);
-  assert.match(del, /write_note и search_replace недоступны/);
+  assert.match(del, /write_note, search_replace, append_note и save_attachment недоступны/);
   assert.doesNotMatch(del, /переписывает файл целиком/);
   assert.match(systemPrompt("", "all", false), /Режим all/);
 });
@@ -98,7 +102,7 @@ test("replaceOnce не трогает повтор", () => {
   assert.throws(() => replaceOnce("аа", "а", "б"), /больше одного раза/);
 });
 
-function memoryFs(): { fs: VaultFs; files: Map<string, string>; trashed: string[] } {
+function memoryFs(): { fs: VaultFs; files: Map<string, string>; images: Map<string, Uint8Array>; trashed: string[] } {
   const files = new Map<string, string>([["лекция.md", "Было так."]]);
   const images = new Map<string, Uint8Array>([["кадр.png", Uint8Array.from([1, 2, 3])]]);
   const trashed: string[] = [];
@@ -117,6 +121,9 @@ function memoryFs(): { fs: VaultFs; files: Map<string, string>; trashed: string[
     },
     async write(path, content) {
       files.set(path, content);
+    },
+    async writeBytes(path, bytes) {
+      images.set(path, bytes);
     },
     async bytes(path) {
       const bytes = images.get(path);
@@ -139,7 +146,7 @@ function memoryFs(): { fs: VaultFs; files: Map<string, string>; trashed: string[
       trashed.push(path);
     },
   };
-  return { fs, files, trashed };
+  return { fs, files, images, trashed };
 }
 
 test("агент смотрит картинку и правит текст", async () => {
@@ -545,6 +552,9 @@ test("неоднозначный путь не выбирает файл сам"
     async write() {
       throw new Error("нельзя");
     },
+    async writeBytes() {
+      throw new Error("нельзя");
+    },
     async bytes() {
       throw new Error("нельзя");
     },
@@ -573,6 +583,9 @@ test("heic не отправляется модели", async () => {
       throw new Error("нельзя");
     },
     async write() {
+      throw new Error("нельзя");
+    },
+    async writeBytes() {
       throw new Error("нельзя");
     },
     async bytes() {
@@ -608,6 +621,9 @@ test("create_folder создаёт недостающих родителей и 
       throw new Error("нельзя");
     },
     async write() {
+      throw new Error("нельзя");
+    },
+    async writeBytes() {
       throw new Error("нельзя");
     },
     async bytes() {
@@ -655,4 +671,39 @@ test("delete_note не трогает .obsidian и папки", async () => {
   const { fs } = memoryFs();
   await assert.rejects(() => dispatchTool(fs, "delete_note", { path: ".obsidian/app.json" }), /папку \.obsidian не трогаю/);
   await assert.rejects(() => dispatchTool(fs, "delete_note", { path: "нет такой.md" }), /нет файла/);
+});
+
+test("append_note дописывает в конец и под заголовок, чужой файл не создаёт", async () => {
+  const { fs, files } = memoryFs();
+  const end = await dispatchTool(fs, "append_note", { path: "лекция", content: "Ещё." });
+  assert.equal(end.text, "дописал в лекция.md");
+  assert.equal(files.get("лекция.md"), "Было так.\n\nЕщё.\n");
+  files.set("лекция.md", "# День\n\nутро\n");
+  const under = await dispatchTool(fs, "append_note", { path: "лекция.md", content: "вечер", heading: "День" });
+  assert.equal(under.text, "дописал в лекция.md");
+  assert.equal(files.get("лекция.md"), "# День\n\nутро\n\nвечер\n");
+  await assert.rejects(() => dispatchTool(fs, "append_note", { path: "нет.md", content: "x" }), /нет файла/);
+  await assert.rejects(() => dispatchTool(fs, "append_note", { path: "лекция.md", content: "x", heading: "Ночь" }), /нет заголовка Ночь/);
+  assert.equal(files.get("лекция.md"), "# День\n\nутро\n\nвечер\n");
+});
+
+test("save_attachment кладёт байты вложения и вставляет ссылку", async () => {
+  const { fs, files, images } = memoryFs();
+  const shot = Uint8Array.from([9, 8, 7]);
+  const attachments: Attachment[] = [{ name: "снимок.png", mime: "image/png", base64: bytesToBase64(shot) }];
+  const saved = await dispatchTool(fs, "save_attachment", { name: "снимок.png", path: "снимок.png", note: "лекция" }, undefined, attachments);
+  assert.equal(saved.text, "сохранил снимок.png и вставил в лекция.md");
+  assert.deepEqual(images.get("снимок.png"), shot);
+  assert.equal(files.get("лекция.md"), "Было так.\n\n![[снимок.png]]\n");
+  await assert.rejects(() => dispatchTool(fs, "save_attachment", { name: "нет.png", path: "a.png" }, undefined, attachments), /нет вложения нет.png/);
+  await assert.rejects(() => dispatchTool(fs, "save_attachment", { name: "снимок.png", path: "снимок.png" }, undefined, attachments), /файл уже есть/);
+  await assert.rejects(() => dispatchTool(fs, "save_attachment", { name: "снимок.png", path: "папка/снимок.png" }, undefined, attachments), /нет папки папка/);
+  await assert.rejects(() => dispatchTool(fs, "save_attachment", { name: "снимок.png", path: ".obsidian/a.png" }, undefined, attachments), /такой путь записать нельзя/);
+  await assert.rejects(
+    () => dispatchTool(fs, "save_attachment", { name: "снимок.png", path: "другой.png", heading: "День" }, undefined, attachments),
+    /heading указан без заметки/,
+  );
+  const only = await dispatchTool(fs, "save_attachment", { name: "снимок.png", path: "только.png" }, undefined, attachments);
+  assert.equal(only.text, "сохранил только.png");
+  assert.equal(files.get("лекция.md"), "Было так.\n\n![[снимок.png]]\n");
 });

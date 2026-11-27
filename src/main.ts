@@ -270,7 +270,7 @@ export default class AgentPlugin extends Plugin {
         },
         callTool: async (name, args) => {
           assertModeTool(mode, name);
-          const output = await dispatchTool(this.vaultFs(), name, args, this.webHttp());
+          const output = await dispatchTool(this.vaultFs(), name, args, this.webHttp(), attachments);
           if (requestId !== this.requestId || this.stop) throw new Error("остановлено");
           return output;
         },
@@ -379,6 +379,18 @@ export default class AgentPlugin extends Plugin {
           if (!(app.vault.getAbstractFileByPath(parent) instanceof TFolder)) throw new Error("нет папки " + parent);
         }
         await app.vault.create(path, content);
+      },
+      async writeBytes(path, bytes) {
+        const file = app.vault.getAbstractFileByPath(path);
+        if (file instanceof TFolder) throw new Error("это папка");
+        if (file instanceof TFile) throw new Error("файл уже есть: " + path);
+        const slash = path.lastIndexOf("/");
+        if (slash > 0) {
+          const parent = path.slice(0, slash);
+          if (!(app.vault.getAbstractFileByPath(parent) instanceof TFolder)) throw new Error("нет папки " + parent);
+        }
+        const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+        await app.vault.createBinary(path, copy);
       },
       async bytes(path) {
         const file = app.vault.getAbstractFileByPath(path);

@@ -35,7 +35,10 @@ export const TOOLS = [
       description: "Прочитать текстовый файл хранилища.",
       parameters: {
         type: "object",
-        properties: { path: { type: "string", description: "Путь от корня хранилища" } },
+        properties: {
+          path: { type: "string", description: "Путь от корня хранилища" },
+          offset: { type: "number", description: "Смещение в символах. Без него чтение с начала. Если кусок не последний, в ответе указан следующий offset." },
+        },
         required: ["path"],
       },
     },
@@ -110,6 +113,39 @@ export const TOOLS = [
   {
     type: "function",
     function: {
+      name: "append_note",
+      description: "Дописать текст в конец заметки или в конец раздела под заголовком. Файл целиком не переписывает и не создаёт.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          content: { type: "string" },
+          heading: { type: "string", description: "Текст заголовка. Без него дописывает в конец файла. С ним — в конец этого раздела, перед следующим заголовком того же или более высокого уровня." },
+        },
+        required: ["path", "content"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "save_attachment",
+      description: "Сохранить картинку из текущего сообщения пользователя в хранилище. Если указан note, вставляет в эту заметку строку ![[путь]].",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Имя вложения, как оно названо в сообщении" },
+          path: { type: "string", description: "Куда положить файл. Папка должна уже быть." },
+          note: { type: "string", description: "Заметка, куда вставить ![[путь]]. Без неё файл только сохраняется." },
+          heading: { type: "string", description: "Если указан вместе с note, вставка в конец этого раздела." },
+        },
+        required: ["name", "path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "delete_note",
       description: "Убрать файл в корзину хранилища. Не удаляет папки и не стирает безвозвратно.",
       parameters: {
@@ -149,7 +185,7 @@ export const WEB_TOOLS: ReadonlySet<string> = new Set(["web_search", "fetch_url"
 
 const MODE_NAMES: Record<AgentMode, ReadonlySet<string>> = {
   chat: new Set(["read_note", "list_folder", "view_image", ...WEB_TOOLS]),
-  write: new Set(["read_note", "view_image", "search_replace", "write_note", ...WEB_TOOLS]),
+  write: new Set(["read_note", "view_image", "search_replace", "write_note", "append_note", "save_attachment", ...WEB_TOOLS]),
   delete: new Set(["read_note", "list_folder", "view_image", "delete_note", ...WEB_TOOLS]),
   all: new Set(TOOLS.map((tool) => tool.function.name)),
 };
@@ -171,7 +207,13 @@ export function assertModeTool(mode: AgentMode, name: string): void {
 }
 
 export function systemPrompt(activePath: string, mode: AgentMode, web: boolean): string {
-  const parts = [modeRules(mode), focusLine(activePath, mode), "Картинка во вложении пользователя уже лежит в его сообщении. view_image открывает только картинку из хранилища.", readable(mode)];
+  const parts = [
+    modeRules(mode),
+    focusLine(activePath, mode),
+    "Картинка во вложении пользователя уже лежит в его сообщении. view_image открывает только картинку из хранилища.",
+    "Если read_note начал ответ со строки «фрагмент», эта строка не текст заметки. Следующий кусок читай с указанным offset.",
+    readable(mode),
+  ];
   if (web) parts.push(webRules(mode));
   return parts.join("\n");
 }
@@ -201,8 +243,10 @@ function modeRules(mode: AgentMode): string {
     return [
       "Ты агент внутри Obsidian. Режим write: читай файлы и картинки и правь текст.",
       "Хранилище смотри только инструментами, не выдумывай текст файлов и картинок.",
-      "Картинку сначала открой через view_image. Маленькую правку делай через search_replace.",
+      "Картинку из хранилища сначала открой через view_image. Маленькую правку делай через search_replace.",
       "write_note переписывает файл целиком и не создаёт папку. Список папок и создание папок недоступны.",
+      "append_note дописывает текст: без heading в конец файла, с heading — в конец этого раздела. Файл он не создаёт.",
+      "save_attachment кладёт картинку из текущего сообщения в хранилище и, если указан note, вставляет в заметку ![[путь]]. Папку он не создаёт.",
     ].join("\n");
   }
   if (mode === "delete") {
@@ -210,7 +254,7 @@ function modeRules(mode: AgentMode): string {
       "Ты агент внутри Obsidian. Режим delete: читай хранилище и убирай файлы в корзину.",
       "Хранилище смотри только инструментами, не выдумывай текст файлов и картинок.",
       "delete_note отправляет файл в корзину, а не стирает. Удаляй только файлы, названные пользователем прямо: папки и .obsidian инструмент не трогает.",
-      "Писать и править текст нельзя: write_note и search_replace недоступны.",
+      "Писать и править текст нельзя: write_note, search_replace, append_note и save_attachment недоступны.",
     ].join("\n");
   }
   return [
@@ -218,6 +262,8 @@ function modeRules(mode: AgentMode): string {
     "Хранилище смотри только инструментами, не выдумывай текст файлов и картинок.",
     "Картинку сначала открой через view_image. Маленькую правку делай через search_replace.",
     "write_note переписывает файл целиком и не создаёт папку. Новую папку создай через create_folder: недостающие родители он создаёт сам.",
+    "append_note дописывает текст: без heading в конец файла, с heading — в конец этого раздела. Файл он не создаёт.",
+    "save_attachment кладёт картинку из текущего сообщения в хранилище и, если указан note, вставляет в заметку ![[путь]]. Папку он не создаёт: сначала create_folder.",
     "Файл убирает только delete_note, и тот отправляет его в корзину, а не стирает. Без задания пользователя файлы не удаляй.",
   ].join("\n");
 }

@@ -68,6 +68,17 @@ function bytesToBase64(bytes) {
   }
   return btoa(binary);
 }
+function base64ToBytes(base64) {
+  let binary;
+  try {
+    binary = atob(base64);
+  } catch (e) {
+    throw new Error("\u0432\u043B\u043E\u0436\u0435\u043D\u0438\u0435 \u043F\u043E\u0432\u0440\u0435\u0436\u0434\u0435\u043D\u043E");
+  }
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
 async function prepareHeic(name, bytes, decodeHeic) {
   if (bytes.byteLength > IMAGE_BYTES_LIMIT) throw new Error(IMAGE_TOO_BIG);
   const jpeg = await decodeHeic(bytes);
@@ -141,7 +152,10 @@ var TOOLS = [
       description: "\u041F\u0440\u043E\u0447\u0438\u0442\u0430\u0442\u044C \u0442\u0435\u043A\u0441\u0442\u043E\u0432\u044B\u0439 \u0444\u0430\u0439\u043B \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0430.",
       parameters: {
         type: "object",
-        properties: { path: { type: "string", description: "\u041F\u0443\u0442\u044C \u043E\u0442 \u043A\u043E\u0440\u043D\u044F \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0430" } },
+        properties: {
+          path: { type: "string", description: "\u041F\u0443\u0442\u044C \u043E\u0442 \u043A\u043E\u0440\u043D\u044F \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0430" },
+          offset: { type: "number", description: "\u0421\u043C\u0435\u0449\u0435\u043D\u0438\u0435 \u0432 \u0441\u0438\u043C\u0432\u043E\u043B\u0430\u0445. \u0411\u0435\u0437 \u043D\u0435\u0433\u043E \u0447\u0442\u0435\u043D\u0438\u0435 \u0441 \u043D\u0430\u0447\u0430\u043B\u0430. \u0415\u0441\u043B\u0438 \u043A\u0443\u0441\u043E\u043A \u043D\u0435 \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0439, \u0432 \u043E\u0442\u0432\u0435\u0442\u0435 \u0443\u043A\u0430\u0437\u0430\u043D \u0441\u043B\u0435\u0434\u0443\u044E\u0449\u0438\u0439 offset." }
+        },
         required: ["path"]
       }
     }
@@ -216,6 +230,39 @@ var TOOLS = [
   {
     type: "function",
     function: {
+      name: "append_note",
+      description: "\u0414\u043E\u043F\u0438\u0441\u0430\u0442\u044C \u0442\u0435\u043A\u0441\u0442 \u0432 \u043A\u043E\u043D\u0435\u0446 \u0437\u0430\u043C\u0435\u0442\u043A\u0438 \u0438\u043B\u0438 \u0432 \u043A\u043E\u043D\u0435\u0446 \u0440\u0430\u0437\u0434\u0435\u043B\u0430 \u043F\u043E\u0434 \u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043A\u043E\u043C. \u0424\u0430\u0439\u043B \u0446\u0435\u043B\u0438\u043A\u043E\u043C \u043D\u0435 \u043F\u0435\u0440\u0435\u043F\u0438\u0441\u044B\u0432\u0430\u0435\u0442 \u0438 \u043D\u0435 \u0441\u043E\u0437\u0434\u0430\u0451\u0442.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          content: { type: "string" },
+          heading: { type: "string", description: "\u0422\u0435\u043A\u0441\u0442 \u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043A\u0430. \u0411\u0435\u0437 \u043D\u0435\u0433\u043E \u0434\u043E\u043F\u0438\u0441\u044B\u0432\u0430\u0435\u0442 \u0432 \u043A\u043E\u043D\u0435\u0446 \u0444\u0430\u0439\u043B\u0430. \u0421 \u043D\u0438\u043C \u2014 \u0432 \u043A\u043E\u043D\u0435\u0446 \u044D\u0442\u043E\u0433\u043E \u0440\u0430\u0437\u0434\u0435\u043B\u0430, \u043F\u0435\u0440\u0435\u0434 \u0441\u043B\u0435\u0434\u0443\u044E\u0449\u0438\u043C \u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043A\u043E\u043C \u0442\u043E\u0433\u043E \u0436\u0435 \u0438\u043B\u0438 \u0431\u043E\u043B\u0435\u0435 \u0432\u044B\u0441\u043E\u043A\u043E\u0433\u043E \u0443\u0440\u043E\u0432\u043D\u044F." }
+        },
+        required: ["path", "content"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "save_attachment",
+      description: "\u0421\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C \u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0443 \u0438\u0437 \u0442\u0435\u043A\u0443\u0449\u0435\u0433\u043E \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F \u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044F \u0432 \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435. \u0415\u0441\u043B\u0438 \u0443\u043A\u0430\u0437\u0430\u043D note, \u0432\u0441\u0442\u0430\u0432\u043B\u044F\u0435\u0442 \u0432 \u044D\u0442\u0443 \u0437\u0430\u043C\u0435\u0442\u043A\u0443 \u0441\u0442\u0440\u043E\u043A\u0443 ![[\u043F\u0443\u0442\u044C]].",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "\u0418\u043C\u044F \u0432\u043B\u043E\u0436\u0435\u043D\u0438\u044F, \u043A\u0430\u043A \u043E\u043D\u043E \u043D\u0430\u0437\u0432\u0430\u043D\u043E \u0432 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0438" },
+          path: { type: "string", description: "\u041A\u0443\u0434\u0430 \u043F\u043E\u043B\u043E\u0436\u0438\u0442\u044C \u0444\u0430\u0439\u043B. \u041F\u0430\u043F\u043A\u0430 \u0434\u043E\u043B\u0436\u043D\u0430 \u0443\u0436\u0435 \u0431\u044B\u0442\u044C." },
+          note: { type: "string", description: "\u0417\u0430\u043C\u0435\u0442\u043A\u0430, \u043A\u0443\u0434\u0430 \u0432\u0441\u0442\u0430\u0432\u0438\u0442\u044C ![[\u043F\u0443\u0442\u044C]]. \u0411\u0435\u0437 \u043D\u0435\u0451 \u0444\u0430\u0439\u043B \u0442\u043E\u043B\u044C\u043A\u043E \u0441\u043E\u0445\u0440\u0430\u043D\u044F\u0435\u0442\u0441\u044F." },
+          heading: { type: "string", description: "\u0415\u0441\u043B\u0438 \u0443\u043A\u0430\u0437\u0430\u043D \u0432\u043C\u0435\u0441\u0442\u0435 \u0441 note, \u0432\u0441\u0442\u0430\u0432\u043A\u0430 \u0432 \u043A\u043E\u043D\u0435\u0446 \u044D\u0442\u043E\u0433\u043E \u0440\u0430\u0437\u0434\u0435\u043B\u0430." }
+        },
+        required: ["name", "path"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
       name: "delete_note",
       description: "\u0423\u0431\u0440\u0430\u0442\u044C \u0444\u0430\u0439\u043B \u0432 \u043A\u043E\u0440\u0437\u0438\u043D\u0443 \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0430. \u041D\u0435 \u0443\u0434\u0430\u043B\u044F\u0435\u0442 \u043F\u0430\u043F\u043A\u0438 \u0438 \u043D\u0435 \u0441\u0442\u0438\u0440\u0430\u0435\u0442 \u0431\u0435\u0437\u0432\u043E\u0437\u0432\u0440\u0430\u0442\u043D\u043E.",
       parameters: {
@@ -253,7 +300,7 @@ var TOOLS = [
 var WEB_TOOLS = /* @__PURE__ */ new Set(["web_search", "fetch_url"]);
 var MODE_NAMES = {
   chat: /* @__PURE__ */ new Set(["read_note", "list_folder", "view_image", ...WEB_TOOLS]),
-  write: /* @__PURE__ */ new Set(["read_note", "view_image", "search_replace", "write_note", ...WEB_TOOLS]),
+  write: /* @__PURE__ */ new Set(["read_note", "view_image", "search_replace", "write_note", "append_note", "save_attachment", ...WEB_TOOLS]),
   delete: /* @__PURE__ */ new Set(["read_note", "list_folder", "view_image", "delete_note", ...WEB_TOOLS]),
   all: new Set(TOOLS.map((tool) => tool.function.name))
 };
@@ -271,7 +318,13 @@ function assertModeTool(mode, name) {
   throw new Error("\u0440\u0435\u0436\u0438\u043C " + mode + " \u043D\u0435 \u0434\u0430\u0451\u0442 " + name);
 }
 function systemPrompt(activePath, mode, web) {
-  const parts = [modeRules(mode), focusLine(activePath, mode), "\u041A\u0430\u0440\u0442\u0438\u043D\u043A\u0430 \u0432\u043E \u0432\u043B\u043E\u0436\u0435\u043D\u0438\u0438 \u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044F \u0443\u0436\u0435 \u043B\u0435\u0436\u0438\u0442 \u0432 \u0435\u0433\u043E \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0438. view_image \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0443 \u0438\u0437 \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0430.", readable(mode)];
+  const parts = [
+    modeRules(mode),
+    focusLine(activePath, mode),
+    "\u041A\u0430\u0440\u0442\u0438\u043D\u043A\u0430 \u0432\u043E \u0432\u043B\u043E\u0436\u0435\u043D\u0438\u0438 \u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044F \u0443\u0436\u0435 \u043B\u0435\u0436\u0438\u0442 \u0432 \u0435\u0433\u043E \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0438. view_image \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0443 \u0438\u0437 \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0430.",
+    "\u0415\u0441\u043B\u0438 read_note \u043D\u0430\u0447\u0430\u043B \u043E\u0442\u0432\u0435\u0442 \u0441\u043E \u0441\u0442\u0440\u043E\u043A\u0438 \xAB\u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442\xBB, \u044D\u0442\u0430 \u0441\u0442\u0440\u043E\u043A\u0430 \u043D\u0435 \u0442\u0435\u043A\u0441\u0442 \u0437\u0430\u043C\u0435\u0442\u043A\u0438. \u0421\u043B\u0435\u0434\u0443\u044E\u0449\u0438\u0439 \u043A\u0443\u0441\u043E\u043A \u0447\u0438\u0442\u0430\u0439 \u0441 \u0443\u043A\u0430\u0437\u0430\u043D\u043D\u044B\u043C offset.",
+    readable(mode)
+  ];
   if (web) parts.push(webRules(mode));
   return parts.join("\n");
 }
@@ -298,8 +351,10 @@ function modeRules(mode) {
     return [
       "\u0422\u044B \u0430\u0433\u0435\u043D\u0442 \u0432\u043D\u0443\u0442\u0440\u0438 Obsidian. \u0420\u0435\u0436\u0438\u043C write: \u0447\u0438\u0442\u0430\u0439 \u0444\u0430\u0439\u043B\u044B \u0438 \u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0438 \u0438 \u043F\u0440\u0430\u0432\u044C \u0442\u0435\u043A\u0441\u0442.",
       "\u0425\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435 \u0441\u043C\u043E\u0442\u0440\u0438 \u0442\u043E\u043B\u044C\u043A\u043E \u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442\u0430\u043C\u0438, \u043D\u0435 \u0432\u044B\u0434\u0443\u043C\u044B\u0432\u0430\u0439 \u0442\u0435\u043A\u0441\u0442 \u0444\u0430\u0439\u043B\u043E\u0432 \u0438 \u043A\u0430\u0440\u0442\u0438\u043D\u043E\u043A.",
-      "\u041A\u0430\u0440\u0442\u0438\u043D\u043A\u0443 \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u043E\u0442\u043A\u0440\u043E\u0439 \u0447\u0435\u0440\u0435\u0437 view_image. \u041C\u0430\u043B\u0435\u043D\u044C\u043A\u0443\u044E \u043F\u0440\u0430\u0432\u043A\u0443 \u0434\u0435\u043B\u0430\u0439 \u0447\u0435\u0440\u0435\u0437 search_replace.",
-      "write_note \u043F\u0435\u0440\u0435\u043F\u0438\u0441\u044B\u0432\u0430\u0435\u0442 \u0444\u0430\u0439\u043B \u0446\u0435\u043B\u0438\u043A\u043E\u043C \u0438 \u043D\u0435 \u0441\u043E\u0437\u0434\u0430\u0451\u0442 \u043F\u0430\u043F\u043A\u0443. \u0421\u043F\u0438\u0441\u043E\u043A \u043F\u0430\u043F\u043E\u043A \u0438 \u0441\u043E\u0437\u0434\u0430\u043D\u0438\u0435 \u043F\u0430\u043F\u043E\u043A \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u043D\u044B."
+      "\u041A\u0430\u0440\u0442\u0438\u043D\u043A\u0443 \u0438\u0437 \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0430 \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u043E\u0442\u043A\u0440\u043E\u0439 \u0447\u0435\u0440\u0435\u0437 view_image. \u041C\u0430\u043B\u0435\u043D\u044C\u043A\u0443\u044E \u043F\u0440\u0430\u0432\u043A\u0443 \u0434\u0435\u043B\u0430\u0439 \u0447\u0435\u0440\u0435\u0437 search_replace.",
+      "write_note \u043F\u0435\u0440\u0435\u043F\u0438\u0441\u044B\u0432\u0430\u0435\u0442 \u0444\u0430\u0439\u043B \u0446\u0435\u043B\u0438\u043A\u043E\u043C \u0438 \u043D\u0435 \u0441\u043E\u0437\u0434\u0430\u0451\u0442 \u043F\u0430\u043F\u043A\u0443. \u0421\u043F\u0438\u0441\u043E\u043A \u043F\u0430\u043F\u043E\u043A \u0438 \u0441\u043E\u0437\u0434\u0430\u043D\u0438\u0435 \u043F\u0430\u043F\u043E\u043A \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u043D\u044B.",
+      "append_note \u0434\u043E\u043F\u0438\u0441\u044B\u0432\u0430\u0435\u0442 \u0442\u0435\u043A\u0441\u0442: \u0431\u0435\u0437 heading \u0432 \u043A\u043E\u043D\u0435\u0446 \u0444\u0430\u0439\u043B\u0430, \u0441 heading \u2014 \u0432 \u043A\u043E\u043D\u0435\u0446 \u044D\u0442\u043E\u0433\u043E \u0440\u0430\u0437\u0434\u0435\u043B\u0430. \u0424\u0430\u0439\u043B \u043E\u043D \u043D\u0435 \u0441\u043E\u0437\u0434\u0430\u0451\u0442.",
+      "save_attachment \u043A\u043B\u0430\u0434\u0451\u0442 \u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0443 \u0438\u0437 \u0442\u0435\u043A\u0443\u0449\u0435\u0433\u043E \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F \u0432 \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435 \u0438, \u0435\u0441\u043B\u0438 \u0443\u043A\u0430\u0437\u0430\u043D note, \u0432\u0441\u0442\u0430\u0432\u043B\u044F\u0435\u0442 \u0432 \u0437\u0430\u043C\u0435\u0442\u043A\u0443 ![[\u043F\u0443\u0442\u044C]]. \u041F\u0430\u043F\u043A\u0443 \u043E\u043D \u043D\u0435 \u0441\u043E\u0437\u0434\u0430\u0451\u0442."
     ].join("\n");
   }
   if (mode === "delete") {
@@ -307,7 +362,7 @@ function modeRules(mode) {
       "\u0422\u044B \u0430\u0433\u0435\u043D\u0442 \u0432\u043D\u0443\u0442\u0440\u0438 Obsidian. \u0420\u0435\u0436\u0438\u043C delete: \u0447\u0438\u0442\u0430\u0439 \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435 \u0438 \u0443\u0431\u0438\u0440\u0430\u0439 \u0444\u0430\u0439\u043B\u044B \u0432 \u043A\u043E\u0440\u0437\u0438\u043D\u0443.",
       "\u0425\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435 \u0441\u043C\u043E\u0442\u0440\u0438 \u0442\u043E\u043B\u044C\u043A\u043E \u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442\u0430\u043C\u0438, \u043D\u0435 \u0432\u044B\u0434\u0443\u043C\u044B\u0432\u0430\u0439 \u0442\u0435\u043A\u0441\u0442 \u0444\u0430\u0439\u043B\u043E\u0432 \u0438 \u043A\u0430\u0440\u0442\u0438\u043D\u043E\u043A.",
       "delete_note \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u044F\u0435\u0442 \u0444\u0430\u0439\u043B \u0432 \u043A\u043E\u0440\u0437\u0438\u043D\u0443, \u0430 \u043D\u0435 \u0441\u0442\u0438\u0440\u0430\u0435\u0442. \u0423\u0434\u0430\u043B\u044F\u0439 \u0442\u043E\u043B\u044C\u043A\u043E \u0444\u0430\u0439\u043B\u044B, \u043D\u0430\u0437\u0432\u0430\u043D\u043D\u044B\u0435 \u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u0435\u043C \u043F\u0440\u044F\u043C\u043E: \u043F\u0430\u043F\u043A\u0438 \u0438 .obsidian \u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442 \u043D\u0435 \u0442\u0440\u043E\u0433\u0430\u0435\u0442.",
-      "\u041F\u0438\u0441\u0430\u0442\u044C \u0438 \u043F\u0440\u0430\u0432\u0438\u0442\u044C \u0442\u0435\u043A\u0441\u0442 \u043D\u0435\u043B\u044C\u0437\u044F: write_note \u0438 search_replace \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u043D\u044B."
+      "\u041F\u0438\u0441\u0430\u0442\u044C \u0438 \u043F\u0440\u0430\u0432\u0438\u0442\u044C \u0442\u0435\u043A\u0441\u0442 \u043D\u0435\u043B\u044C\u0437\u044F: write_note, search_replace, append_note \u0438 save_attachment \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u043D\u044B."
     ].join("\n");
   }
   return [
@@ -315,6 +370,8 @@ function modeRules(mode) {
     "\u0425\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435 \u0441\u043C\u043E\u0442\u0440\u0438 \u0442\u043E\u043B\u044C\u043A\u043E \u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442\u0430\u043C\u0438, \u043D\u0435 \u0432\u044B\u0434\u0443\u043C\u044B\u0432\u0430\u0439 \u0442\u0435\u043A\u0441\u0442 \u0444\u0430\u0439\u043B\u043E\u0432 \u0438 \u043A\u0430\u0440\u0442\u0438\u043D\u043E\u043A.",
     "\u041A\u0430\u0440\u0442\u0438\u043D\u043A\u0443 \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u043E\u0442\u043A\u0440\u043E\u0439 \u0447\u0435\u0440\u0435\u0437 view_image. \u041C\u0430\u043B\u0435\u043D\u044C\u043A\u0443\u044E \u043F\u0440\u0430\u0432\u043A\u0443 \u0434\u0435\u043B\u0430\u0439 \u0447\u0435\u0440\u0435\u0437 search_replace.",
     "write_note \u043F\u0435\u0440\u0435\u043F\u0438\u0441\u044B\u0432\u0430\u0435\u0442 \u0444\u0430\u0439\u043B \u0446\u0435\u043B\u0438\u043A\u043E\u043C \u0438 \u043D\u0435 \u0441\u043E\u0437\u0434\u0430\u0451\u0442 \u043F\u0430\u043F\u043A\u0443. \u041D\u043E\u0432\u0443\u044E \u043F\u0430\u043F\u043A\u0443 \u0441\u043E\u0437\u0434\u0430\u0439 \u0447\u0435\u0440\u0435\u0437 create_folder: \u043D\u0435\u0434\u043E\u0441\u0442\u0430\u044E\u0449\u0438\u0435 \u0440\u043E\u0434\u0438\u0442\u0435\u043B\u0438 \u043E\u043D \u0441\u043E\u0437\u0434\u0430\u0451\u0442 \u0441\u0430\u043C.",
+    "append_note \u0434\u043E\u043F\u0438\u0441\u044B\u0432\u0430\u0435\u0442 \u0442\u0435\u043A\u0441\u0442: \u0431\u0435\u0437 heading \u0432 \u043A\u043E\u043D\u0435\u0446 \u0444\u0430\u0439\u043B\u0430, \u0441 heading \u2014 \u0432 \u043A\u043E\u043D\u0435\u0446 \u044D\u0442\u043E\u0433\u043E \u0440\u0430\u0437\u0434\u0435\u043B\u0430. \u0424\u0430\u0439\u043B \u043E\u043D \u043D\u0435 \u0441\u043E\u0437\u0434\u0430\u0451\u0442.",
+    "save_attachment \u043A\u043B\u0430\u0434\u0451\u0442 \u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0443 \u0438\u0437 \u0442\u0435\u043A\u0443\u0449\u0435\u0433\u043E \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F \u0432 \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435 \u0438, \u0435\u0441\u043B\u0438 \u0443\u043A\u0430\u0437\u0430\u043D note, \u0432\u0441\u0442\u0430\u0432\u043B\u044F\u0435\u0442 \u0432 \u0437\u0430\u043C\u0435\u0442\u043A\u0443 ![[\u043F\u0443\u0442\u044C]]. \u041F\u0430\u043F\u043A\u0443 \u043E\u043D \u043D\u0435 \u0441\u043E\u0437\u0434\u0430\u0451\u0442: \u0441\u043D\u0430\u0447\u0430\u043B\u0430 create_folder.",
     "\u0424\u0430\u0439\u043B \u0443\u0431\u0438\u0440\u0430\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E delete_note, \u0438 \u0442\u043E\u0442 \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u044F\u0435\u0442 \u0435\u0433\u043E \u0432 \u043A\u043E\u0440\u0437\u0438\u043D\u0443, \u0430 \u043D\u0435 \u0441\u0442\u0438\u0440\u0430\u0435\u0442. \u0411\u0435\u0437 \u0437\u0430\u0434\u0430\u043D\u0438\u044F \u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044F \u0444\u0430\u0439\u043B\u044B \u043D\u0435 \u0443\u0434\u0430\u043B\u044F\u0439."
   ].join("\n");
 }
@@ -1270,6 +1327,97 @@ async function writeOpenNote(editors, store, content) {
   if (await store.read() !== content) throw new Error("\u0444\u0430\u0439\u043B \u043D\u0435 \u0441\u043E\u0445\u0440\u0430\u043D\u0438\u043B\u0441\u044F");
 }
 
+// src/note-text.ts
+var NOTE_CHUNK = 1e5;
+function sliceNote(text, offset) {
+  if (!Number.isInteger(offset) || offset < 0) throw new Error("offset \u0434\u043E\u043B\u0436\u0435\u043D \u0431\u044B\u0442\u044C \u0446\u0435\u043B\u044B\u043C \u0447\u0438\u0441\u043B\u043E\u043C \u043E\u0442 0");
+  if (offset > text.length || offset === text.length && text.length > 0) {
+    throw new Error("offset " + offset + " \u0437\u0430 \u043A\u043E\u043D\u0446\u043E\u043C \u0437\u0430\u043C\u0435\u0442\u043A\u0438 (" + text.length + " \u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432)");
+  }
+  const end = Math.min(text.length, offset + NOTE_CHUNK);
+  const slice = text.slice(offset, end);
+  if (offset === 0 && end === text.length) return slice;
+  const next = end < text.length ? " \u0414\u0430\u043B\u044C\u0448\u0435 \u0447\u0438\u0442\u0430\u0439 \u0441 offset " + end + "." : "";
+  return "\u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442 " + offset + "-" + end + " \u0438\u0437 " + text.length + "." + next + "\n" + slice;
+}
+function appendNote(text, content, heading) {
+  const block = content.trim();
+  if (!block) throw new Error("\u043D\u0435\u0447\u0435\u0433\u043E \u0434\u043E\u043F\u0438\u0441\u044B\u0432\u0430\u0442\u044C");
+  if (heading === void 0) return appendEnd(text, block);
+  return appendUnder(text, block, headingTitle(heading));
+}
+function headingTitle(raw) {
+  const trimmed = raw.trim();
+  const marked = /^(#{1,6})[ \t]+(.+)$/.exec(trimmed);
+  const title = (marked ? marked[2] : trimmed).replace(/\s+#+\s*$/, "").trim();
+  if (!title) throw new Error("\u043F\u0443\u0441\u0442\u043E\u0439 \u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A");
+  return title;
+}
+function appendEnd(text, block) {
+  if (text.length === 0) return block + "\n";
+  const base = text.endsWith("\n") ? text : text + "\n";
+  const gap = base.endsWith("\n\n") ? "" : "\n";
+  return base + gap + block + "\n";
+}
+function appendUnder(text, block, title) {
+  const lines = text.split("\n");
+  const hits = headingHits(lines, title);
+  if (hits.length === 0) throw new Error("\u043D\u0435\u0442 \u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043A\u0430 " + title);
+  if (hits.length > 1) throw new Error("\u043D\u0435\u0441\u043A\u043E\u043B\u044C\u043A\u043E \u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043A\u043E\u0432 " + title);
+  const hit = hits[0];
+  const end = sectionEnd(lines, hit);
+  const body = lines.slice(hit.index + 1, end).join("\n") + (end < lines.length ? "\n" : "");
+  const nextBody = body.trim().length === 0 ? "\n" + block + "\n" : appendEnd(body, block);
+  let merged = lines.slice(0, hit.index + 1).join("\n") + "\n" + nextBody;
+  const tail = lines.slice(end).join("\n");
+  if (tail.length === 0) return merged;
+  if (!merged.endsWith("\n\n")) merged += "\n";
+  return merged + tail;
+}
+function headingHits(lines, title) {
+  const hits = [];
+  let fence = null;
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    const marker = fenceMarker(line);
+    if (marker) {
+      fence = fence === marker ? null : fence != null ? fence : marker;
+      continue;
+    }
+    if (fence) continue;
+    const parsed = parseHeading(line);
+    if (parsed && parsed.title === title) hits.push({ index, level: parsed.level });
+  }
+  return hits;
+}
+function sectionEnd(lines, hit) {
+  let fence = null;
+  for (let index = hit.index + 1; index < lines.length; index++) {
+    const line = lines[index];
+    const marker = fenceMarker(line);
+    if (marker) {
+      fence = fence === marker ? null : fence != null ? fence : marker;
+      continue;
+    }
+    if (fence) continue;
+    const parsed = parseHeading(line);
+    if (parsed && parsed.level <= hit.level) return index;
+  }
+  return lines.length;
+}
+function parseHeading(line) {
+  const match = /^(#{1,6})[ \t]+(.+?)\s*$/.exec(line);
+  if (!match) return null;
+  const title = match[2].replace(/\s+#+\s*$/, "").trim();
+  if (!title) return null;
+  return { level: match[1].length, title };
+}
+function fenceMarker(line) {
+  if (line.startsWith("```")) return "```";
+  if (line.startsWith("~~~")) return "~~~";
+  return null;
+}
+
 // src/replace.ts
 function replaceOnce(text, oldStr, newStr) {
   if (oldStr === "") throw new Error("\u043F\u0443\u0441\u0442\u043E\u0439 \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442 \u0434\u043B\u044F \u0437\u0430\u043C\u0435\u043D\u044B");
@@ -1424,7 +1572,6 @@ function nonTextContentType(contentType) {
 }
 
 // src/vault.ts
-var TEXT_LIMIT = 1e5;
 var LIST_LIMIT = 200;
 var FETCH_RESPONSE_LIMIT = 2e6;
 var IMAGE_MIME = {
@@ -1461,6 +1608,67 @@ function str(args, key) {
   if (typeof value !== "string") throw new Error(key + " \u0434\u043E\u043B\u0436\u0435\u043D \u0431\u044B\u0442\u044C \u0441\u0442\u0440\u043E\u043A\u043E\u0439");
   return value;
 }
+function optStr(args, key) {
+  if (!Object.prototype.hasOwnProperty.call(args, key) || args[key] === void 0) return void 0;
+  const value = args[key];
+  if (typeof value !== "string") throw new Error(key + " \u0434\u043E\u043B\u0436\u0435\u043D \u0431\u044B\u0442\u044C \u0441\u0442\u0440\u043E\u043A\u043E\u0439");
+  if (!value.trim()) throw new Error(key + " \u043F\u0443\u0441\u0442\u043E\u0439");
+  return value;
+}
+function noteOffset(args) {
+  if (!Object.prototype.hasOwnProperty.call(args, "offset") || args.offset === void 0) return 0;
+  const value = args.offset;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) throw new Error("offset \u0434\u043E\u043B\u0436\u0435\u043D \u0431\u044B\u0442\u044C \u0446\u0435\u043B\u044B\u043C \u0447\u0438\u0441\u043B\u043E\u043C \u043E\u0442 0");
+  return value;
+}
+function newFilePath(raw) {
+  const path = raw.trim().replace(/^\/+/, "");
+  if (!path || path === ".obsidian" || path.startsWith(".obsidian/")) throw new Error("\u0442\u0430\u043A\u043E\u0439 \u043F\u0443\u0442\u044C \u0437\u0430\u043F\u0438\u0441\u0430\u0442\u044C \u043D\u0435\u043B\u044C\u0437\u044F");
+  if (path.split("/").some((part) => part === "" || part === "." || part === "..")) throw new Error("\u0442\u0430\u043A\u043E\u0439 \u043F\u0443\u0442\u044C \u0437\u0430\u043F\u0438\u0441\u0430\u0442\u044C \u043D\u0435\u043B\u044C\u0437\u044F");
+  return path;
+}
+async function assertCanCreate(fs, path) {
+  const existing = await fs.find(path);
+  if (existing == null ? void 0 : existing.folder) throw new Error("\u044D\u0442\u043E \u043F\u0430\u043F\u043A\u0430");
+  if (existing) throw new Error("\u0444\u0430\u0439\u043B \u0443\u0436\u0435 \u0435\u0441\u0442\u044C: " + path);
+  const slash = path.lastIndexOf("/");
+  if (slash <= 0) return;
+  const parent = path.slice(0, slash);
+  const folder = await fs.find(parent);
+  if (!folder) throw new Error("\u043D\u0435\u0442 \u043F\u0430\u043F\u043A\u0438 " + parent);
+  if (!folder.folder) throw new Error("\u044D\u0442\u043E \u0444\u0430\u0439\u043B: " + parent);
+}
+async function saveAttachment(fs, args, attachments) {
+  const name = str(args, "name");
+  const path = newFilePath(str(args, "path"));
+  const note = optStr(args, "note");
+  const heading = optStr(args, "heading");
+  if (heading !== void 0 && note === void 0) throw new Error("heading \u0443\u043A\u0430\u0437\u0430\u043D \u0431\u0435\u0437 \u0437\u0430\u043C\u0435\u0442\u043A\u0438");
+  const bytes = takeAttachment(attachments, name);
+  await assertCanCreate(fs, path);
+  let notePath;
+  let nextNote;
+  if (note !== void 0) {
+    notePath = await resolvePath(fs, note);
+    nextNote = appendNote(await fs.read(notePath), "![[" + path + "]]", heading);
+  }
+  await fs.writeBytes(path, bytes);
+  if (notePath === void 0 || nextNote === void 0) return "\u0441\u043E\u0445\u0440\u0430\u043D\u0438\u043B " + path;
+  try {
+    await fs.write(notePath, nextNote);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error("\u0441\u043E\u0445\u0440\u0430\u043D\u0438\u043B " + path + ", \u043D\u043E \u0437\u0430\u043C\u0435\u0442\u043A\u0443 \u043D\u0435 \u0437\u0430\u043F\u0438\u0441\u0430\u043B: " + message);
+  }
+  return "\u0441\u043E\u0445\u0440\u0430\u043D\u0438\u043B " + path + " \u0438 \u0432\u0441\u0442\u0430\u0432\u0438\u043B \u0432 " + notePath;
+}
+function takeAttachment(attachments, name) {
+  if (!attachments) throw new Error("\u0432 \u044D\u0442\u043E\u043C \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0438 \u043D\u0435\u0442 \u0432\u043B\u043E\u0436\u0435\u043D\u0438\u0439");
+  const hits = attachments.filter((item) => item.name === name);
+  if (hits.length === 0) throw new Error("\u043D\u0435\u0442 \u0432\u043B\u043E\u0436\u0435\u043D\u0438\u044F " + name);
+  if (hits.length > 1) throw new Error("\u043D\u0435\u0441\u043A\u043E\u043B\u044C\u043A\u043E \u0432\u043B\u043E\u0436\u0435\u043D\u0438\u0439 " + name);
+  return base64ToBytes(hits[0].base64);
+}
 function imageMime(path) {
   var _a;
   const ext = ((_a = path.split(".").pop()) == null ? void 0 : _a.toLowerCase()) || "";
@@ -1480,7 +1688,7 @@ async function resolvePath(fs, raw) {
   if (hits.length === 0) throw new Error("\u043D\u0435\u0442 \u0444\u0430\u0439\u043B\u0430 " + raw);
   throw new Error("\u043D\u0435\u0441\u043A\u043E\u043B\u044C\u043A\u043E \u0444\u0430\u0439\u043B\u043E\u0432: " + hits.join(", "));
 }
-async function dispatchTool(fs, name, args, web) {
+async function dispatchTool(fs, name, args, web, attachments) {
   if (name === "web_search") {
     if (!web) throw new Error("\u043F\u043E\u0438\u0441\u043A \u0432 \u0441\u0435\u0442\u0438 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0430\u0445");
     return { text: await webSearch(web, args) };
@@ -1503,8 +1711,7 @@ async function dispatchTool(fs, name, args, web) {
   if (name === "read_note") {
     const path = await resolvePath(fs, str(args, "path"));
     const text = await fs.read(path);
-    if (text.length > TEXT_LIMIT) throw new Error("\u0437\u0430\u043C\u0435\u0442\u043A\u0430 \u0441\u043B\u0438\u0448\u043A\u043E\u043C \u0431\u043E\u043B\u044C\u0448\u0430\u044F: " + text.length + " \u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432");
-    return { text };
+    return { text: sliceNote(text, noteOffset(args)) };
   }
   if (name === "view_image") {
     const path = await resolvePath(fs, str(args, "path"));
@@ -1527,6 +1734,16 @@ async function dispatchTool(fs, name, args, web) {
     const content = str(args, "content");
     await fs.write(raw, content);
     return { text: "\u0437\u0430\u043F\u0438\u0441\u0430\u043B " + raw + ", " + content.length + " \u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432" };
+  }
+  if (name === "append_note") {
+    const path = await resolvePath(fs, str(args, "path"));
+    const text = await fs.read(path);
+    const next = appendNote(text, str(args, "content"), optStr(args, "heading"));
+    await fs.write(path, next);
+    return { text: "\u0434\u043E\u043F\u0438\u0441\u0430\u043B \u0432 " + path };
+  }
+  if (name === "save_attachment") {
+    return { text: await saveAttachment(fs, args, attachments) };
   }
   if (name === "delete_note") {
     const path = await resolvePath(fs, str(args, "path"));
@@ -1818,7 +2035,7 @@ var AgentPlugin = class extends import_obsidian.Plugin {
         },
         callTool: async (name, args) => {
           assertModeTool(mode, name);
-          const output = await dispatchTool(this.vaultFs(), name, args, this.webHttp());
+          const output = await dispatchTool(this.vaultFs(), name, args, this.webHttp(), attachments);
           if (requestId !== this.requestId || this.stop) throw new Error("\u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u043E");
           return output;
         }
@@ -1924,6 +2141,18 @@ var AgentPlugin = class extends import_obsidian.Plugin {
           if (!(app.vault.getAbstractFileByPath(parent) instanceof import_obsidian.TFolder)) throw new Error("\u043D\u0435\u0442 \u043F\u0430\u043F\u043A\u0438 " + parent);
         }
         await app.vault.create(path, content);
+      },
+      async writeBytes(path, bytes) {
+        const file = app.vault.getAbstractFileByPath(path);
+        if (file instanceof import_obsidian.TFolder) throw new Error("\u044D\u0442\u043E \u043F\u0430\u043F\u043A\u0430");
+        if (file instanceof import_obsidian.TFile) throw new Error("\u0444\u0430\u0439\u043B \u0443\u0436\u0435 \u0435\u0441\u0442\u044C: " + path);
+        const slash = path.lastIndexOf("/");
+        if (slash > 0) {
+          const parent = path.slice(0, slash);
+          if (!(app.vault.getAbstractFileByPath(parent) instanceof import_obsidian.TFolder)) throw new Error("\u043D\u0435\u0442 \u043F\u0430\u043F\u043A\u0438 " + parent);
+        }
+        const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+        await app.vault.createBinary(path, copy);
       },
       async bytes(path) {
         const file = app.vault.getAbstractFileByPath(path);

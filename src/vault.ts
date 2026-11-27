@@ -1,9 +1,9 @@
-import { IMAGE_BYTES_LIMIT, IMAGE_TOO_BIG, IMAGE_TYPE, bytesToBase64 } from "./attach.ts";
+import { IMAGE_BYTES_LIMIT, IMAGE_TOO_BIG, IMAGE_TYPE, base64ToBytes, bytesToBase64, type Attachment } from "./attach.ts";
+import { appendNote, sliceNote } from "./note-text.ts";
 import { replaceOnce } from "./replace.ts";
 import { extractPageText, formatSearchResults, nonTextContentType, pageUrl, parseSearchHtml, blockedPage, searchQuery, searchUrl, trimFetch } from "./web.ts";
 import type { HttpInit } from "./http.ts";
 
-const TEXT_LIMIT = 100_000;
 const LIST_LIMIT = 200;
 const FETCH_RESPONSE_LIMIT = 2_000_000;
 
@@ -22,6 +22,7 @@ export interface VaultFs {
   findMany(path: string): Promise<string[]>;
   read(path: string): Promise<string>;
   write(path: string, content: string): Promise<void>;
+  writeBytes(path: string, bytes: Uint8Array): Promise<void>;
   bytes(path: string): Promise<Uint8Array>;
   children(path: string): Promise<Listed[]>;
   mkdir(path: string): Promise<void>;
@@ -58,6 +59,73 @@ function str(args: Record<string, unknown>, key: string): string {
   return value;
 }
 
+function optStr(args: Record<string, unknown>, key: string): string | undefined {
+  if (!Object.prototype.hasOwnProperty.call(args, key) || args[key] === undefined) return undefined;
+  const value = args[key];
+  if (typeof value !== "string") throw new Error(key + " должен быть строкой");
+  if (!value.trim()) throw new Error(key + " пустой");
+  return value;
+}
+
+function noteOffset(args: Record<string, unknown>): number {
+  if (!Object.prototype.hasOwnProperty.call(args, "offset") || args.offset === undefined) return 0;
+  const value = args.offset;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) throw new Error("offset должен быть целым числом от 0");
+  return value;
+}
+
+function newFilePath(raw: string): string {
+  const path = raw.trim().replace(/^\/+/, "");
+  if (!path || path === ".obsidian" || path.startsWith(".obsidian/")) throw new Error("такой путь записать нельзя");
+  if (path.split("/").some((part) => part === "" || part === "." || part === "..")) throw new Error("такой путь записать нельзя");
+  return path;
+}
+
+async function assertCanCreate(fs: VaultFs, path: string): Promise<void> {
+  const existing = await fs.find(path);
+  if (existing?.folder) throw new Error("это папка");
+  if (existing) throw new Error("файл уже есть: " + path);
+  const slash = path.lastIndexOf("/");
+  if (slash <= 0) return;
+  const parent = path.slice(0, slash);
+  const folder = await fs.find(parent);
+  if (!folder) throw new Error("нет папки " + parent);
+  if (!folder.folder) throw new Error("это файл: " + parent);
+}
+
+async function saveAttachment(fs: VaultFs, args: Record<string, unknown>, attachments: Attachment[] | undefined): Promise<string> {
+  const name = str(args, "name");
+  const path = newFilePath(str(args, "path"));
+  const note = optStr(args, "note");
+  const heading = optStr(args, "heading");
+  if (heading !== undefined && note === undefined) throw new Error("heading указан без заметки");
+  const bytes = takeAttachment(attachments, name);
+  await assertCanCreate(fs, path);
+  let notePath: string | undefined;
+  let nextNote: string | undefined;
+  if (note !== undefined) {
+    notePath = await resolvePath(fs, note);
+    nextNote = appendNote(await fs.read(notePath), "![[" + path + "]]", heading);
+  }
+  await fs.writeBytes(path, bytes);
+  if (notePath === undefined || nextNote === undefined) return "сохранил " + path;
+  try {
+    await fs.write(notePath, nextNote);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error("сохранил " + path + ", но заметку не записал: " + message);
+  }
+  return "сохранил " + path + " и вставил в " + notePath;
+}
+
+function takeAttachment(attachments: Attachment[] | undefined, name: string): Uint8Array {
+  if (!attachments) throw new Error("в этом сообщении нет вложений");
+  const hits = attachments.filter((item) => item.name === name);
+  if (hits.length === 0) throw new Error("нет вложения " + name);
+  if (hits.length > 1) throw new Error("несколько вложений " + name);
+  return base64ToBytes(hits[0].base64);
+}
+
 function imageMime(path: string): string {
   const ext = path.split(".").pop()?.toLowerCase() || "";
   const mime = IMAGE_MIME[ext];
@@ -82,7 +150,13 @@ export interface WebHttp {
   fetch(init: HttpInit): Promise<{ status: number; text: string; contentType: string }>;
 }
 
-export async function dispatchTool(fs: VaultFs, name: string, args: Record<string, unknown>, web?: WebHttp): Promise<{ text: string; image?: { mime: string; base64: string } }> {
+export async function dispatchTool(
+  fs: VaultFs,
+  name: string,
+  args: Record<string, unknown>,
+  web?: WebHttp,
+  attachments?: Attachment[],
+): Promise<{ text: string; image?: { mime: string; base64: string } }> {
   if (name === "web_search") {
     if (!web) throw new Error("поиск в сети выключен в настройках");
     return { text: await webSearch(web, args) };
@@ -105,8 +179,7 @@ export async function dispatchTool(fs: VaultFs, name: string, args: Record<strin
   if (name === "read_note") {
     const path = await resolvePath(fs, str(args, "path"));
     const text = await fs.read(path);
-    if (text.length > TEXT_LIMIT) throw new Error("заметка слишком большая: " + text.length + " символов");
-    return { text };
+    return { text: sliceNote(text, noteOffset(args)) };
   }
   if (name === "view_image") {
     const path = await resolvePath(fs, str(args, "path"));
@@ -129,6 +202,16 @@ export async function dispatchTool(fs: VaultFs, name: string, args: Record<strin
     const content = str(args, "content");
     await fs.write(raw, content);
     return { text: "записал " + raw + ", " + content.length + " символов" };
+  }
+  if (name === "append_note") {
+    const path = await resolvePath(fs, str(args, "path"));
+    const text = await fs.read(path);
+    const next = appendNote(text, str(args, "content"), optStr(args, "heading"));
+    await fs.write(path, next);
+    return { text: "дописал в " + path };
+  }
+  if (name === "save_attachment") {
+    return { text: await saveAttachment(fs, args, attachments) };
   }
   if (name === "delete_note") {
     const path = await resolvePath(fs, str(args, "path"));
